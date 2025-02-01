@@ -3,7 +3,7 @@ import aiohttp
 import asyncio
 from .oauth import TokenHandler
 
-logger = logging.getLogger(f"spotify.{__name__}")
+logger = logging.getLogger(__name__)
 
 base_url = "https://api.spotify.com/v1"
 
@@ -140,6 +140,7 @@ class RequestHandler:
             default_headers.update(headers)
         # Create the full URL
         url = f"{base_url}/{endpoint.lstrip('/')}"
+        logger.debug(f"{method = } {url = } {default_headers = } {params = } {data = }")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.request(method=method, url=url, params=params, json=data, headers=default_headers) as resp:

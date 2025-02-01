@@ -9,7 +9,7 @@ from aiohttp import web
 from urllib.parse import urlparse, urlencode
 from .storage import JSONStorage
 
-logger = logging.getLogger(f"spotify.{__name__}")
+logger = logging.getLogger(__name__)
 
 closeBrowser = """
 <!DOCTYPE html>
@@ -40,29 +40,10 @@ class WebServer:
         self._runner = None
         self._site = None
         self._app_task = None
-        self.routes = {}
 
     def add_route(self, path, handler, method='GET', **kwargs):
         """Add a new route to the application."""
-        route_info = {
-            'handler': handler,
-            'method': method,
-            'kwargs': kwargs
-        }
-        self.routes[path] = route_info
-        match method:
-            case 'GET':
-                self.app.router.add_get(path, handler, **kwargs)
-            case 'POST':
-                self.app.router.add_post(path, handler, **kwargs)
-            case 'PUT':
-                self.app.router.add_put(path, handler, **kwargs)
-            case 'DELETE':
-                self.app.router.add_delete(path, handler, **kwargs)
-            case _:
-                self.app.router.add_route(method, path, handler, **kwargs)
-        logger.info(f"Added {method} route for {path} on Webserver")
-
+        self.app.router.add_route(method, path, handler, **kwargs)
 
     async def start(self):
         """Start the web server."""
@@ -71,7 +52,6 @@ class WebServer:
             await self._runner.setup()
             self._site = web.TCPSite(self._runner, self.host, self.port)
             self._app_task = asyncio.create_task(self._site.start())
-            logger.warning(f"Webserver started on {self.host}:{self.port}")
 
     async def stop(self):
         """Stop the web server."""
@@ -80,7 +60,6 @@ class WebServer:
         if self._runner:
             await self._runner.cleanup()
         self._app_task = None
-        logger.warning("Webserver stopped")
 
 
 class TokenHandler:
@@ -114,6 +93,7 @@ class TokenHandler:
         return web.Response(text=closeBrowser, content_type='text/html', charset='utf-8')
 
     async def _get_auth_code(self):
+        logger.warning(f"Getting Oauth code...")
         await self.server.start()
         self._auth_future = asyncio.Future()
         params = {
@@ -145,6 +125,7 @@ class TokenHandler:
 
     async def _refresh_token(self):
         """ Refresh oauth token, get new token if refresh fails """
+        logger.warning(f"Refreshing token...")
         try:
             return await self._token_request({
                 "grant_type": "refresh_token",
@@ -156,6 +137,7 @@ class TokenHandler:
 
     async def get_new_token(self):
         """ Get a new oauth token using the oauth code, get code if we dont have one yet """
+        logger.warning(f"Getting new token...")
         if not self._auth_code:
             await self._get_auth_code()
         return await self._token_request({
@@ -173,11 +155,11 @@ class TokenHandler:
 
     async def _login(self):
         """ Checks storage for saved token, gets new token if one isnt found. """
-        # try to load from storage
+        logger.info(f"Attempting to load saved token...")
         self._token = None
         self._token = await self.storage.load_token(name="spotify")
         if not self._token:
-            # no token in storage, get new one
+            logger.warning(f"No token found in storage!")
             self._token = await self.get_new_token()
 
     async def get_token(self):

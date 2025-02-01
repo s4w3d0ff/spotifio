@@ -4,7 +4,7 @@ import aiofiles
 from abc import ABC, abstractmethod
 import logging
 
-logger = logging.getLogger(f"spotify.{__name__}")
+logger = logging.getLogger(__name__)
 
 class TokenStorage(ABC):        
     @abstractmethod
@@ -29,6 +29,7 @@ class JSONStorage(TokenStorage):
         self.storage_dir = storage_dir
         if not os.path.exists(self.storage_dir):
             os.makedirs(self.storage_dir)
+            logger.warning(f"Created dir {self.storage_dir}")
 
     async def _load(self, filename):
         async with aiofiles.open(filename, 'r') as file:
@@ -43,6 +44,7 @@ class JSONStorage(TokenStorage):
         """ Saves OAuth token to database"""
         file_path = os.path.join(self.storage_dir, name+"_token.json")
         await self._save(token, file_path)
+        logger.warning(f"Token saved at: {file_path}")
 
     async def load_token(self, name=''):
         """ Gets saved OAuth token from database"""
