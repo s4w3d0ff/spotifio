@@ -1,9 +1,11 @@
 # spotifio
 Async Spotify Api Wrapper
 
+```
+pip install git+https://github.com/s4w3d0ff/spotifio.git#egg=spotifio
+```
 
 ```python
-import asyncio
 from spotifio import Client
 
 async def main():
@@ -18,5 +20,6 @@ async def main():
     print(r)        
 
 if __name__ == '__main__':
+    import asyncio
     asyncio.run(main())
 ```
