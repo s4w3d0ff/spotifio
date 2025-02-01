@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="spotifio",
-    version="0.1.0",
+    version="0.1.1",
     author="s4w3d0ff",
     author_email="",
     description="An async Spotify Web API client library",
