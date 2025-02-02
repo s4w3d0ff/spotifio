@@ -2,7 +2,7 @@
 Async Spotify Api Wrapper
 
 ```
-pip install git+https://github.com/s4w3d0ff/spotifio.git#egg=spotifio
+pip install spotifio
 ```
 
 ```python
@@ -17,7 +17,7 @@ async def main():
     )
     await c.login()
     r = await c.get_currently_playing()
-    print(r)        
+    print(r)
 
 if __name__ == '__main__':
     import asyncio
