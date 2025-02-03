@@ -80,7 +80,10 @@ class TokenHandler:
         parsed_uri = urlparse(self.redirect_uri)
         self.server = WebServer(parsed_uri.hostname, parsed_uri.port)
         self.server.add_route(f"/{parsed_uri.path.lstrip('/')}", self._callback_handler)
-        
+        # refresh token handler stuff
+        self._refresh_event = asyncio.Event()
+        self._refresh_task = None
+        self._running = False
         
     async def _callback_handler(self, request):
         if request.query.get('state') != self._state:
@@ -113,13 +116,17 @@ class TokenHandler:
 
     async def _token_request(self, data):
         """ Base token request method, used for new or refreshing tokens """
+        if self._token:
+            # temp store refresh token (spotify doesnt always send one)
+            r_token = self._token['refresh_token'] 
         async with aiohttp.ClientSession() as session:
             async with session.post(self._token_url, headers=self._token_headers, data=data) as resp:
                 if resp.status != 200:
                     raise Exception(f"Token request failed: {await resp.text()}")
                 self._token = await resp.json()
-                if "expires_in" in self._token:
-                    self._token["expires_time"] = time.time()+int(self._token['expires_in'])
+                if "refresh_token" not in self._token:
+                    self._token['refresh_token'] = r_token 
+                self._token["expires_time"] = time.time()+int(self._token['expires_in'])
                 await self.storage.save_token(self._token, name="spotify")
                 return self._token
 
@@ -133,38 +140,51 @@ class TokenHandler:
             })
         except Exception as e:
             logger.error(f"Refreshing token failed! {e}")
-            return await self.get_new_token()
+            return await self._get_new_token()
 
-    async def get_new_token(self):
+    async def _get_new_token(self):
         """ Get a new oauth token using the oauth code, get code if we dont have one yet """
         logger.warning(f"Getting new token...")
-        if not self._auth_code:
-            await self._get_auth_code()
+        await self._get_auth_code()
         return await self._token_request({
             "grant_type": "authorization_code",
             "code": self._auth_code,
             "redirect_uri": self.redirect_uri
         })
 
-    async def _check_token(self):
-        """ Check token expire time, refresh if needed """
-        time_left = self._token['expires_time'] - time.time()
-        logger.debug(f"Token expires in {time_left} seconds...")
-        if time_left < 0:
-            await self._refresh_token()
+    async def _token_refresher(self):
+        """ Waits for the time to refresh the token and refreshes """
+        self._running = True
+        self._refresh_event.set()
+        while self._running:
+            time_left = self._token['expires_time'] - time.time()
+            logger.info(f"Token expires in {time_left} seconds...")
+            if time_left <= 0:
+                # pause 'self.get_token'
+                self._refresh_event.clear()
+                # refresh token
+                await self._refresh_token()
+                # resume 'self.get_token'
+                self._refresh_event.set()
+                continue # skip sleep to get new time_left
+            await asyncio.sleep(time_left+0.5)
 
-    async def _login(self):
-        """ Checks storage for saved token, gets new token if one isnt found. """
-        logger.info(f"Attempting to load saved token...")
-        self._token = None
-        self._token = await self.storage.load_token(name="spotify")
+    async def _login(self, token=None):
+        """ Checks storage for saved token, gets new token if one isnt found. Starts the token refresher task."""
+        self._token = token
+        if not self._token:
+            logger.warning(f"Attempting to load saved token...")
+            self._refresh_task = None
+            self._token = await self.storage.load_token(name="spotify")
         if not self._token:
             logger.warning(f"No token found in storage!")
-            self._token = await self.get_new_token()
+            self._token = await self._get_new_token()
+        self._refresh_task = asyncio.create_task(self._token_refresher())
 
     async def get_token(self):
         """ Returns current token after checking if the token needs to be refreshed """
         if not self._token:
-            await self.login()
-        await self._check_token()
+            await self._login()
+        # wait for refresh if needed
+        await self._refresh_event.wait()
         return self._token
