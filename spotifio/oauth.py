@@ -55,11 +55,11 @@ class WebServer:
 
 
 class TokenHandler:
-    def __init__(self, client_id, client_secret, redirect_uri=None, scope=[], storage=None):
+    def __init__(self, client_id, client_secret, redirect_uri=None, scope=[], storage=None, *args, **kwargs):
         self.client_id = client_id
         self.redirect_uri = redirect_uri or "http://localhost:8888/callback"
         self.scope = scope
-        self.storage = storage or JSONStorage()
+        self.storage = storage or JSONStorage(*args, **kwargs)
         self._state = os.urandom(14).hex()
         self._auth_code = None
         self._auth_future = None
