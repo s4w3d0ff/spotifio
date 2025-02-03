@@ -122,9 +122,9 @@ class RequestHandler:
         if missing_scopes:
             raise Exception(f"Missing required scopes for {method_name}: {', '.join(missing_scopes)}")
 
-    async def login(self):
+    async def login(self, token=None):
         """ Sets up the token """
-        await self.token_handler._login()
+        await self.token_handler._login(token)
     
     async def _request(self, method, endpoint, params=None, data=None, headers=None):
         """ Base Request Method for Spotify API calls """
@@ -140,13 +140,16 @@ class RequestHandler:
             default_headers.update(headers)
         # Create the full URL
         url = f"{base_url}/{endpoint.lstrip('/')}"
-        logger.debug(f"{method = } {url = } {default_headers = } {params = } {data = }")
+        logger.debug(f"_request({method=}, {url=}, {params=}, {data=})")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.request(method=method, url=url, params=params, json=data, headers=default_headers) as resp:
                     # Check if the response status is successful
                     if resp.status == 204:  # No content
                         return None
+                    if resp.status == 401:  # bad token
+                        await self.token_handler._refresh_token()
+                        return await self._request(method, endpoint, params, data, headers)
                     if resp.status == 429:  # Rate limiting
                         retry_after = int(resp.headers.get('Retry-After', 1))
                         logger.warning(f"Rate limited. Waiting {retry_after} seconds")
