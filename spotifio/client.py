@@ -122,9 +122,9 @@ class RequestHandler:
         if missing_scopes:
             raise Exception(f"Missing required scopes for {method_name}: {', '.join(missing_scopes)}")
 
-    async def login(self):
+    async def login(self, token=None):
         """ Sets up the token """
-        await self.token_handler._login()
+        await self.token_handler._login(token)
     
     async def _request(self, method, endpoint, params=None, data=None, headers=None):
         """ Base Request Method for Spotify API calls """

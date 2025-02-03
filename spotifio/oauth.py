@@ -1,7 +1,7 @@
 import aiohttp
 import asyncio
 import webbrowser
-import random
+import os
 import base64
 import logging
 import time
@@ -23,14 +23,6 @@ closeBrowser = """
     </body>
 </html>
 """
-
-
-def randString(length=12, chars=None):
-    if not chars:
-        import string
-        chars = string.ascii_letters + string.digits
-    ranstr = ''.join(random.choice(chars) for _ in range(length))
-    return ranstr
 
 class WebServer:
     def __init__(self, host, port):
@@ -68,7 +60,7 @@ class TokenHandler:
         self.redirect_uri = redirect_uri or "http://localhost:8888/callback"
         self.scope = scope
         self.storage = storage or JSONStorage()
-        self._state = randString(16)
+        self._state = os.urandom(14).hex()
         self._auth_code = None
         self._auth_future = None
         self._token = None
@@ -96,7 +88,7 @@ class TokenHandler:
         return web.Response(text=closeBrowser, content_type='text/html', charset='utf-8')
 
     async def _get_auth_code(self):
-        logger.warning(f"Getting Oauth code...")
+        logger.warning(f"Opening browser to get Oauth code...")
         await self.server.start()
         self._auth_future = asyncio.Future()
         params = {
@@ -107,12 +99,18 @@ class TokenHandler:
         }
         if self.scope:
             params['scope'] = ' '.join(self.scope)
-        # open webbrowser with auth link
-        webbrowser.open(f"https://accounts.spotify.com/authorize?{urlencode(params)}")
+        auth_link = f"https://accounts.spotify.com/authorize?{urlencode(params)}"
+        try:
+            # open webbrowser with auth link
+            webbrowser.open(auth_link)
+        except:
+            # cant open webbrowser, show auth link for user to copy/paste
+            logger.error(f"Couldn't open default browser!: \n{auth_link}")
         # wait for auth code
         await self._auth_future
         # stop webserver
         await self.server.stop()
+        logger.warning(f"Got Oauth code!")
 
     async def _token_request(self, data):
         """ Base token request method, used for new or refreshing tokens """
@@ -144,8 +142,8 @@ class TokenHandler:
 
     async def _get_new_token(self):
         """ Get a new oauth token using the oauth code, get code if we dont have one yet """
-        logger.warning(f"Getting new token...")
         await self._get_auth_code()
+        logger.warning(f"Getting new token...")
         return await self._token_request({
             "grant_type": "authorization_code",
             "code": self._auth_code,
@@ -156,10 +154,11 @@ class TokenHandler:
         """ Waits for the time to refresh the token and refreshes """
         self._running = True
         self._refresh_event.set()
+        logger.debug(f"_token_refresher started...")
         while self._running:
             time_left = self._token['expires_time'] - time.time()
-            logger.info(f"Token expires in {time_left} seconds...")
-            if time_left <= 0:
+            logger.debug(f"Token expires in {time_left} seconds...")
+            if time_left-60 <= 0:
                 # pause 'self.get_token'
                 self._refresh_event.clear()
                 # refresh token
@@ -167,18 +166,19 @@ class TokenHandler:
                 # resume 'self.get_token'
                 self._refresh_event.set()
                 continue # skip sleep to get new time_left
-            await asyncio.sleep(time_left+0.5)
+            await asyncio.sleep(time_left-60)
 
     async def _login(self, token=None):
         """ Checks storage for saved token, gets new token if one isnt found. Starts the token refresher task."""
         self._token = token
+        self._refresh_task = None
         if not self._token:
-            logger.warning(f"Attempting to load saved token...")
-            self._refresh_task = None
+            logger.debug(f"Attempting to load saved token...")
             self._token = await self.storage.load_token(name="spotify")
-        if not self._token:
-            logger.warning(f"No token found in storage!")
-            self._token = await self._get_new_token()
+            if self._token:
+                logger.warning(f"Loaded saved token from storage!")
+            else:
+                self._token = await self._get_new_token()
         self._refresh_task = asyncio.create_task(self._token_refresher())
 
     async def get_token(self):
