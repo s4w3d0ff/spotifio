@@ -156,9 +156,9 @@ class TokenHandler:
         self._refresh_event.set()
         logger.debug(f"_token_refresher started...")
         while self._running:
-            time_left = self._token['expires_time'] - time.time()
+            time_left = self._token['expires_time'] - time.time()-60
             logger.debug(f"Token expires in {time_left} seconds...")
-            if time_left-60 <= 0:
+            if time_left <= 0:
                 # pause 'self.get_token'
                 self._refresh_event.clear()
                 # refresh token
@@ -166,20 +166,29 @@ class TokenHandler:
                 # resume 'self.get_token'
                 self._refresh_event.set()
                 continue # skip sleep to get new time_left
-            await asyncio.sleep(time_left-60)
+            await asyncio.sleep(time_left)
+
+    async def _run(self):
+        self._refresh_task = None
+        self._refresh_task = asyncio.create_task(self._token_refresher())
+
+    async def stop(self):
+        self._running = False
+        try:
+            await asyncio.wait_for(self._refresh_task, timeout=15)
+        except TimeoutError:
+            logger.warning('The task was cancelled due to a timeout')
 
     async def _login(self, token=None):
         """ Checks storage for saved token, gets new token if one isnt found. Starts the token refresher task."""
-        self._token = token
-        self._refresh_task = None
-        if not self._token:
-            logger.debug(f"Attempting to load saved token...")
-            self._token = await self.storage.load_token(name="spotify")
-            if self._token:
-                logger.warning(f"Loaded saved token from storage!")
-            else:
-                self._token = await self._get_new_token()
-        self._refresh_task = asyncio.create_task(self._token_refresher())
+        logger.debug(f"Attempting to load saved token...")
+        self._token = await self.storage.load_token(name="spotify")
+        if self._token:
+            logger.warning(f"Loaded saved token from storage!")
+        else:
+            self._token = await self._get_new_token()
+        if not self._running:
+            await self._run()
 
     async def get_token(self):
         """ Returns current token after checking if the token needs to be refreshed """
