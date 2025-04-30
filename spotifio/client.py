@@ -158,7 +158,10 @@ class RequestHandler:
                     if not resp.ok:
                         error_text = await resp.text()
                         raise Exception(f"Request failed with status {resp.status}: {error_text}")
-                    return await resp.json()
+                    try:
+                        return await resp.json()
+                    except:
+                        return resp
         except aiohttp.ClientError as e:
             logger.error(f"Request failed: {str(e)}")
             raise Exception(f"Request failed: {str(e)}")
