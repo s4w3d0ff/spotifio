@@ -105,3 +105,12 @@ async def test_one_session_is_reused_until_close(api):
     assert client._session is session
     await client.close()
     assert client._session is None
+
+
+async def test_async_with_closes_the_session(api):
+    api["script"] = [(200, {"id": "abc"}, {}), (200, {"id": "def"}, {})]
+    async with api["new_handler"]() as client:
+        await client._request("GET", "tracks/abc")
+        session = client._session
+        await client._request("GET", "tracks/def")
+    assert session.closed

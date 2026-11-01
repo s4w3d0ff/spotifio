@@ -32,6 +32,12 @@ class RequestHandler:
             await self._session.close()
         self._session = None
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        await self.close()
+
     async def _check_scope(self, method_name):
         requirements = self.SCOPE_REQUIREMENTS.get(method_name)
         if not requirements:
