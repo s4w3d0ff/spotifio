@@ -24,6 +24,38 @@ if __name__ == '__main__':
     asyncio.run(main())
 ```
 
+## Upgrading from 0.1.x
+
+Three things can affect existing code. Everything else — method names, argument
+order, return payloads, dependencies, Python version — is unchanged.
+
+1. **`redirect_uri` must be supplied** (argument or `SPOTIFIO_REDIRECT_URI`).
+   0.1.7 defaulted to `http://localhost:8888/callback`. Spotify rejects
+   `localhost` as a redirect host, so that default already failed with
+   `redirect_uri: Not matching configuration` for anyone using it; there is no
+   longer a value to fall back to. Fix: pass a URI registered in your app's
+   dashboard, e.g. `http://127.0.0.1:5050/spotify_oauth`.
+2. **`client_id` and `client_secret` must be supplied.** 0.1.7 accepted their
+   absence and failed later with an opaque `401`. Now it is a `ValueError` at
+   construction naming the argument and the environment variable.
+3. **Failed requests raise `spotifio.client.SpotifyError`** instead of a plain
+   `Exception`. It subclasses `Exception` and keeps the old message text
+   (`Request failed with status 404: ...`), so `except Exception` and handling
+   that matches on the message keep working. `.status`, `.reason` and `.body`
+   are additions.
+
+One deliberate semantic change: a scope check now looks at the scopes Spotify
+actually granted the token, not only the list passed to the constructor. A call
+that used to be blocked locally goes through when the token really has the
+scope. If your code relied on that local check as a hard "do not write" policy,
+enforce the policy yourself.
+
+Additive only, no action needed: `login(reauth=True)`, the new methods for the
+documented replacement endpoints, and error messages that name the documented
+replacement when an endpoint is deprecated. The deprecated endpoints are still
+called, so code that uses `get_playlist_tracks`, `save_tracks` or
+`get_artist_related_artists` keeps running exactly as before.
+
 ## Configuration
 
 Everything spotifio needs to reach Spotify comes from an argument or from the
@@ -148,17 +180,6 @@ every app. The deprecated/replacement table above comes from the docs.
 Fields removed from responses: `track.linked_from`, `track.isPlayable`,
 `album.album_group`. Still present: `available_markets`, `external_ids`,
 `popularity`, `album.label`, `artist.followers`.
-
-## Breaking changes in 0.2.0
-
-- `redirect_uri` has no default. Code that relied on the old
-  `http://localhost:8888/callback` default must pass a redirect URI, and it must
-  be one registered for your app (`localhost` is rejected by Spotify).
-- Failed requests raise `spotifio.client.SpotifyError` instead of a plain
-  `Exception`. `SpotifyError` subclasses `Exception` and its message keeps the
-  old wording (`Request failed with status 404: ...`), so `except Exception`
-  and message parsing still work. `.status`, `.reason` and `.body` are new.
-- `Client.login(reauth=True)` is new; `login()` is unchanged.
 
 ## Errors
 
