@@ -6,32 +6,74 @@ error the caller then has to debug, so values come from arguments or from the
 environment and a missing one raises.
 """
 import os
+import re
 
 __all__ = ["load_dotenv", "require_env"]
+
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_TRAILING_COMMENT = re.compile(r"\s+#")
 
 
 def load_dotenv(path=".env"):
     """Load KEY=VALUE lines from a .env file into os.environ.
 
-    Variables already in the environment win. Returns the number of variables
-    set. This is not called automatically: importing spotifio never reads files
-    behind your back.
+    Variables already in the environment win. Blank lines and lines starting with
+    '#' are skipped, a leading 'export ' is allowed, and a comment after whitespace
+    is dropped from an unquoted value. A line that is not KEY=VALUE, an invalid
+    variable name, or a quote that is never closed raises ValueError naming
+    path:lineno. Returns the number of variables set. This is not called
+    automatically: importing spotifio never reads files behind your back.
     """
     if not os.path.exists(path):
         return 0
     count = 0
     with open(path) as file:
-        for line in file:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
+        for lineno, raw_line in enumerate(file, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
                 continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
+            location = f"{path}:{lineno}"
+            key, separator, value = line.partition("=")
+            if not separator:
+                raise ValueError(f"{location}: not a KEY=VALUE line: {line!r}")
+            key = key.removeprefix("export ").strip()
+            if not _NAME.match(key):
+                raise ValueError(f"{location}: {key!r} is not a valid variable name")
+            value = _clean_value(value.strip(), location)
+            if key not in os.environ:
                 os.environ[key] = value
                 count += 1
     return count
+
+
+def _clean_value(value, location):
+    """Take the value a shell would take: strip one pair of quotes, drop a
+    trailing comment, and keep everything else exactly as written."""
+    if value[:1] in ("'", '"'):
+        quote = value[0]
+        end = value.find(quote, 1)
+        if end == -1:
+            raise ValueError(f"{location}: the value starts with {quote} and never closes it")
+        trailing = value[end + 1:].strip()
+        if trailing and not trailing.startswith("#"):
+            raise ValueError(f"{location}: {trailing!r} follows a quoted value and is not a comment")
+        return value[1:end]
+    _reject_glued_variables(value, location)
+    return _TRAILING_COMMENT.split(value, maxsplit=1)[0].strip()
+
+
+def _reject_glued_variables(value, location):
+    """A value that contains another spotifio variable is a .env file whose lines
+    were joined: 'SPOTIFIO_CLIENT_SECRET=xyzSPOTIFIO_SCOPES=read' is one line, not
+    two, and every variable after the first is lost. Give the caller the choice
+    instead of storing a broken secret.
+    """
+    if "SPOTIFIO_" in value:
+        raise ValueError(
+            f"{location}: the value contains another SPOTIFIO_ variable. Each variable "
+            "needs its own line, and the file must end with a newline, or the lines are "
+            "read as one."
+        )
 
 
 def require_env(name, hint=""):
