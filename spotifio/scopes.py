@@ -1,6 +1,8 @@
-# Scopes each Client method needs. A list means all of them; a tuple means any
-# one of them (Spotify accepts either the public or the private variant of the
-# playlist/library write scopes).
+# Scopes each Client method needs. Each value is a list of requirements, and a
+# requirement is either a scope name or a tuple of names where any one is enough
+# (Spotify accepts either the public or the private variant of a playlist write).
+# Reading a playlist needs no scope locally: Spotify answers 403 for the private
+# playlists a token may not read.
 REQUIRED_SCOPES = {
     ### PLAYER -----------------------------------------
     'get_playback_state': ['user-read-playback-state'],
@@ -19,7 +21,7 @@ REQUIRED_SCOPES = {
     'add_to_queue': ['user-modify-playback-state'],
     'get_queue': ['user-read-playback-state'],
     ### USERS ------------------------------------------
-    'get_current_user': ['user-read-private', 'user-read-email'],
+    'get_current_user': [('user-read-private', 'user-read-email')],
     'get_user_profile': [],
     'get_followed_artists': ['user-follow-read'],
     'follow_artists': ['user-follow-modify'],
@@ -28,19 +30,19 @@ REQUIRED_SCOPES = {
     'unfollow_users': ['user-follow-modify'],
     'check_following_artists': ['user-follow-read'],
     'check_following_users': ['user-follow-read'],
-    'follow_playlist': ['playlist-modify-public', 'playlist-modify-private'],
-    'unfollow_playlist': ['playlist-modify-public', 'playlist-modify-private'],
+    'follow_playlist': [('playlist-modify-public', 'playlist-modify-private')],
+    'unfollow_playlist': [('playlist-modify-public', 'playlist-modify-private')],
     'get_user_top_items': ['user-top-read'],
     ### PLAYLISTS -------------------------------------
     'get_playlist': [],
-    'change_playlist_details': ['playlist-modify-public', 'playlist-modify-private'],
+    'change_playlist_details': [('playlist-modify-public', 'playlist-modify-private')],
     'get_playlist_tracks': [],
-    'add_playlist_tracks': ['playlist-modify-public', 'playlist-modify-private'],
-    'update_playlist_tracks': ['playlist-modify-public', 'playlist-modify-private'],
-    'remove_playlist_tracks': ['playlist-modify-public', 'playlist-modify-private'],
+    'add_playlist_tracks': [('playlist-modify-public', 'playlist-modify-private')],
+    'update_playlist_tracks': [('playlist-modify-public', 'playlist-modify-private')],
+    'remove_playlist_tracks': [('playlist-modify-public', 'playlist-modify-private')],
     'get_current_user_playlists': ['playlist-read-private'],
     'get_user_playlists': [],
-    'create_playlist': ['playlist-modify-public', 'playlist-modify-private'],
+    'create_playlist': [('playlist-modify-public', 'playlist-modify-private')],
     'get_featured_playlists': [],
     'get_category_playlists': [],
     ### SEARCH ---------------------------------------
@@ -57,10 +59,10 @@ REQUIRED_SCOPES = {
     'remove_library_items': ['user-library-modify'],
     'check_saved_items': ['user-library-read'],
     ### PLAYLIST ITEMS (replaces the per-playlist tracks endpoints) -----------
-    'get_playlist_items': ['playlist-read-private'],
-    'add_playlist_items': ['playlist-modify-public'],
-    'remove_playlist_items': ['playlist-modify-public'],
-    'update_playlist_items': ['playlist-modify-public'],
+    'get_playlist_items': [],
+    'add_playlist_items': [('playlist-modify-public', 'playlist-modify-private')],
+    'remove_playlist_items': [('playlist-modify-public', 'playlist-modify-private')],
+    'update_playlist_items': [('playlist-modify-public', 'playlist-modify-private')],
     'get_track_audio_features': [],
     'get_several_audio_features': [],
     'get_track_audio_analysis': [],

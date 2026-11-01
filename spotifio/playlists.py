@@ -31,7 +31,7 @@ class PlaylistMethods(RequestHandler):
         if fields:
             params['fields'] = fields
         if additional_types:
-            params['additional_types'] = additional_types
+            params['additional_types'] = ','.join(additional_types)
         return await self._request('GET', f'playlists/{playlist_id}/items', params=params)
 
     async def add_playlist_items(self, playlist_id, uris, position=None):
@@ -125,8 +125,8 @@ class PlaylistMethods(RequestHandler):
         return await self._request('GET', f'users/{user_id}/playlists', params=params)
 
     async def create_playlist(self, user_id, name, public=True, collaborative=False, description=None):
-        """Spotify removed POST /users/{user_id}/playlists in the Feb 2026 changes;
-        create a playlist on 'me' instead (pass your own user id or 'me')."""
+        """Deprecated in the Spotify docs, which point at POST /me/playlists. The
+        request is still made: Spotify decides whether it answers."""
         await self._check_scope('create_playlist')
         data = {
             'name': name,
@@ -138,8 +138,8 @@ class PlaylistMethods(RequestHandler):
         return await self._request('POST', f'users/{user_id}/playlists', data=data)
 
     async def get_featured_playlists(self, locale=None, country=None, limit=20, offset=0):
-        """Deprecated in the Spotify docs and answered 404 in practice. The request is
-        still made so the caller gets a SpotifyError naming the deprecation."""
+        """Deprecated in the Spotify docs, with no replacement documented. The request
+        is still made: Spotify decides whether it answers."""
         await self._check_scope('get_featured_playlists')
         params = {
             'limit': limit,
@@ -152,8 +152,8 @@ class PlaylistMethods(RequestHandler):
         return await self._request('GET', 'browse/featured-playlists', params=params)
 
     async def get_category_playlists(self, category_id, country=None, limit=20, offset=0):
-        """Deprecated in the Spotify docs and answered 404 in practice. The request is
-        still made so the caller gets a SpotifyError naming the deprecation."""
+        """Deprecated in the Spotify docs, with no replacement documented. The request
+        is still made: Spotify decides whether it answers."""
         await self._check_scope('get_category_playlists')
         params = {
             'limit': limit,

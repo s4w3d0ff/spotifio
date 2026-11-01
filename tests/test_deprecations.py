@@ -37,4 +37,5 @@ def test_scope_table_matches_the_client_methods_exactly():
         name for name, obj in inspect.getmembers(Client, inspect.iscoroutinefunction)
         if not name.startswith("_")
     }
-    assert set(REQUIRED_SCOPES) == methods - {"login"}
+    # login and close are client plumbing, not endpoints.
+    assert set(REQUIRED_SCOPES) == methods - {"login", "close"}
