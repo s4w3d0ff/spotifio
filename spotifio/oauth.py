@@ -190,7 +190,6 @@ class TokenHandler:
     async def _token_refresher(self):
         """ Waits for the time to refresh the token and refreshes """
         self._running = True
-        self._refresh_event.set()
         logger.debug(f"_token_refresher started...")
         try:
             while self._running:
@@ -216,13 +215,20 @@ class TokenHandler:
                     # resume 'self.get_token'
                     self._refresh_event.set()
                     continue # skip sleep to get new time_left
+                # Nothing is due yet, so the token in hand is usable.
+                self._refresh_event.set()
                 await asyncio.sleep(time_left)
         finally:
             # A finished loop has to be visible to _login, or a later login() would
-            # assume a refresher is still running when it is not.
+            # assume a refresher is still running when it is not. A caller already
+            # waiting on the event must not wait forever.
             self._running = False
+            self._refresh_event.set()
 
     async def _run(self):
+        # The event means "the token in hand is usable", so it starts closed and
+        # the refresher opens it once it has checked the token.
+        self._refresh_event.clear()
         self._refresh_task = asyncio.create_task(self._token_refresher())
 
     async def stop(self):
@@ -250,6 +256,10 @@ class TokenHandler:
             self._token = await self._get_new_token()
         if self._refresh_task is None or self._refresh_task.done():
             await self._run()
+        # A saved token that is already expired has to be refreshed before the
+        # caller sends anything, or the first request goes out with it and eats a
+        # 401 before the retry does the refresh instead.
+        await self._refresh_event.wait()
 
     async def get_token(self):
         """ Returns current token after checking if the token needs to be refreshed """

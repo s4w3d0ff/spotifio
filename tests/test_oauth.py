@@ -178,3 +178,34 @@ async def test_a_refresher_that_already_ended_is_replaced_by_the_next_login(monk
     await handler._login()
     assert handler._refresh_task is not first
     await handler.stop()
+
+
+async def test_login_refreshes_a_saved_token_that_is_already_expired(monkeypatch, local_server, free_port):
+    # Regression: the refresher used to open the "token is usable" signal before it
+    # had checked the token, so the first request went out with an expired token and
+    # had to be retried after a 401.
+    local_server["script"] = [(200, {"access_token": "fresh", "refresh_token": "r",
+                                     "expires_in": 3600, "scope": "user-library-read"}, {})]
+    handler = make_handler(monkeypatch, free_port)
+    handler._token_url = f"{local_server['base_url']}/api/token"
+    stale = {"access_token": "stale", "refresh_token": "r",
+             "expires_time": time.time() - 1, "scope": "user-library-read"}
+    handler.storage.load_token = lambda name="": already(stale)
+    await asyncio.wait_for(handler._login(), timeout=5)
+    assert handler._token["access_token"] == "fresh"
+    assert handler._token["expires_time"] > time.time()
+    assert len(local_server["calls"]) == 1
+    await handler.stop()
+
+
+async def test_login_returns_with_the_saved_token_when_the_refresh_fails(monkeypatch, local_server, free_port):
+    local_server["script"] = [(400, {"error": {"message": "invalid grant"}}, {})]
+    handler = make_handler(monkeypatch, free_port)
+    handler._token_url = f"{local_server['base_url']}/api/token"
+    stale = {"access_token": "stale", "refresh_token": "r",
+             "expires_time": time.time() - 1, "scope": "user-library-read"}
+    handler.storage.load_token = lambda name="": already(stale)
+    await asyncio.wait_for(handler._login(), timeout=5)
+    assert handler._token["access_token"] == "stale"
+    assert handler._token is not None
+    await handler.stop()

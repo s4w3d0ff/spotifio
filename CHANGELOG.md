@@ -57,6 +57,11 @@ answer.
 - A scope requirement may be a tuple, meaning any one of those scopes is enough.
   Playlist reads need no local check at all, and playlist writes accept the
   public or the private scope, matching what Spotify itself accepts.
+- `login()` refreshes a saved token that is already expired before it returns, so
+  the first request no longer goes out with an expired token and has to be retried
+  after a 401.
+- The scope check follows the scopes the token response reports. A refresh can
+  report more scopes than the request asked for, and that is Spotify's answer.
 - The token file is created `0600` through a temporary file in the same
   directory and renamed into place, instead of being written with umask
   permissions and chmodded afterwards. A directory spotifio creates is `0700`,

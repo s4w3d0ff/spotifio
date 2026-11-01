@@ -101,6 +101,10 @@ these values keeps working unchanged. `scope` may legitimately be empty: an
 empty list means "no scopes", which is enough for app-only calls. A method that
 needs a scope raises `spotifio.ScopeError` and names the scope.
 
+The check looks at the scopes Spotify granted: `TokenHandler.granted_scopes` comes
+from the `scope` field of the token response. A refresh can report more scopes than
+the request asked for, and the check follows the token rather than the request.
+
 `.env.example` in the repo lists all four with the format each one needs; copy it
 to `.env`. Keep one variable per line and keep the final newline: a file whose last
 line has no newline glues the last two variables onto one line, and `load_dotenv()`
@@ -237,9 +241,11 @@ Spotify sometimes answers with no message at all (for example
 `spotifio.ScopeError` is raised before a request when the token lacks a scope the
 endpoint needs, so it never reaches Spotify.
 
-A 401 refreshes the token once and retries; a 429 waits `Retry-After` and retries.
+A 401 refreshes the token and retries; a 429 waits `Retry-After` and retries.
 `RequestHandler.MAX_ATTEMPTS` (6) bounds both, and the error you get carries the
-last status Spotify actually sent.
+last status Spotify actually sent. `login()` refreshes a saved token that is already
+expired before it returns, so the first request does not go out with an expired
+token.
 
 ## Tests
 
