@@ -1,4 +1,3 @@
-import aiohttp.web
 import pytest
 
 from spotifio import request as request_module
@@ -18,38 +17,11 @@ class FakeTokenHandler:
 
 
 @pytest.fixture
-async def api(monkeypatch):
-    """A local stand-in for the Spotify API: script the responses, read the calls."""
-    state = {"script": [], "calls": []}
-
-    async def handle(request):
-        script = state["script"].pop(0) if state["script"] else (200, {"ok": True}, {})
-        status, body, headers = script
-        sent = None
-        if request.can_read_body:
-            sent = await request.json() if request.content_type == "application/json" else await request.text()
-        state["calls"].append({
-            "body": sent,
-            "method": request.method,
-            "path": request.match_info["tail"],
-            "authorization": request.headers.get("Authorization"),
-            "query": dict(request.query),
-        })
-        if isinstance(body, dict):
-            return aiohttp.web.json_response(body, status=status, headers=headers)
-        return aiohttp.web.Response(status=status, body=body, headers=headers)
-
-    app = aiohttp.web.Application()
-    app.router.add_route("*", "/{tail:.*}", handle)
-    runner = aiohttp.web.AppRunner(app)
-    await runner.setup()
-    site = aiohttp.web.TCPSite(runner, "127.0.0.1", 0)
-    await site.start()
-    port = site._server.sockets[0].getsockname()[1]
-    monkeypatch.setattr(request_module, "base_url", f"http://127.0.0.1:{port}")
-    state["new_handler"] = lambda: RequestHandler(token_handler=FakeTokenHandler())
-    yield state
-    await runner.cleanup()
+def api(monkeypatch, local_server):
+    """The local server, wired in as the API base URL."""
+    monkeypatch.setattr(request_module, "base_url", local_server["base_url"])
+    local_server["new_handler"] = lambda: RequestHandler(token_handler=FakeTokenHandler())
+    return local_server
 
 
 async def test_json_response_is_returned_as_a_dict(api):

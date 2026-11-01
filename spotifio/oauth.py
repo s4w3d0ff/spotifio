@@ -8,6 +8,7 @@ import time
 from aiohttp import web
 from urllib.parse import urlparse, urlencode
 from .env import require_env
+from .errors import SpotifyError
 from .storage import JSONStorage
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,6 @@ class WebServer:
         self.port = port
         self._runner = None
         self._site = None
-        self._app_task = None
 
     def add_route(self, path, handler, method='GET', **kwargs):
         """Add a new route to the application."""
@@ -40,22 +40,25 @@ class WebServer:
 
     async def start(self):
         """Start the web server."""
-        if not self._app_task:
+        if self._runner is None:
             self._runner = web.AppRunner(self.app)
             await self._runner.setup()
             self._site = web.TCPSite(self._runner, self.host, self.port)
-            self._app_task = asyncio.create_task(self._site.start())
+            await self._site.start()
 
     async def stop(self):
         """Stop the web server."""
         if self._site:
             await self._site.stop()
+            self._site = None
         if self._runner:
             await self._runner.cleanup()
-        self._app_task = None
+            self._runner = None
 
 
 class TokenHandler:
+    AUTH_CODE_TIMEOUT_SECONDS = 300
+
     def __init__(self, client_id=None, client_secret=None, redirect_uri=None, scope=None, storage=None, *args, **kwargs):
         self.client_id = client_id or require_env("SPOTIFIO_CLIENT_ID")
         self.client_secret = client_secret or require_env("SPOTIFIO_CLIENT_SECRET")
@@ -104,7 +107,7 @@ class TokenHandler:
         if 'error' in request.query:
             return web.Response(text=f"Authorization failed: {request.query['error']}", status=400)
         self._auth_code = request.query.get('code')
-        if self._auth_code and not self._auth_future.done():
+        if self._auth_code and self._auth_future is not None and not self._auth_future.done():
             self._auth_future.set_result(self._auth_code)
         return web.Response(text=closeBrowser, content_type='text/html', charset='utf-8')
 
@@ -124,13 +127,20 @@ class TokenHandler:
         try:
             # open webbrowser with auth link
             webbrowser.open(auth_link)
-        except:
+        except Exception as e:
             # cant open webbrowser, show auth link for user to copy/paste
-            logger.error(f"Couldn't open default browser!: \n{auth_link}")
-        # wait for auth code
-        await self._auth_future
-        # stop webserver
-        await self.server.stop()
+            logger.error(f"Couldn't open default browser! {e}\n{auth_link}")
+        # wait for auth code, then always release the callback port
+        try:
+            await asyncio.wait_for(self._auth_future, timeout=self.AUTH_CODE_TIMEOUT_SECONDS)
+        except TimeoutError:
+            raise TimeoutError(
+                f"No authorization code arrived at {self.redirect_uri} within "
+                f"{self.AUTH_CODE_TIMEOUT_SECONDS} seconds. Authorize the link above "
+                "in a browser, or run this on a machine that can open one."
+            ) from None
+        finally:
+            await self.server.stop()
         logger.warning(f"Got Oauth code!")
 
     async def _token_request(self, data):
@@ -140,7 +150,8 @@ class TokenHandler:
         async with aiohttp.ClientSession() as session:
             async with session.post(self._token_url, headers=self._token_headers, data=data) as resp:
                 if resp.status != 200:
-                    raise Exception(f"Token request failed: {await resp.text()}")
+                    error_text = await resp.text()
+                    raise SpotifyError(resp.status, "token request failed", error_text)
                 self._token = await resp.json()
                 if "refresh_token" not in self._token and r_token:
                     self._token['refresh_token'] = r_token
@@ -150,20 +161,21 @@ class TokenHandler:
                 return self._token
 
     async def _refresh_token(self):
-        """ Refresh oauth token, get new token if refresh fails """
+        """ Refresh the access token with the saved refresh token.
+
+        Raises SpotifyError when there is no refresh token or Spotify rejects it.
+        Re-authorizing needs a browser, which a headless process cannot provide, so
+        the caller has to call login(reauth=True) instead of this method blocking on
+        one.
+        """
         logger.warning(f"Refreshing token...")
         refresh_token = self._token.get('refresh_token') if self._token else None
         if not refresh_token:
-            # No refresh token (e.g. client-credentials only): re-authorize instead
-            return await self._get_new_token()
-        try:
-            return await self._token_request({
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token
-            })
-        except Exception as e:
-            logger.error(f"Refreshing token failed! {e}")
-            return await self._get_new_token()
+            raise SpotifyError(401, "no refresh token was saved, call login(reauth=True) to authorize again")
+        return await self._token_request({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token
+        })
 
     async def _get_new_token(self):
         """ Get a new oauth token using the oauth code, get code if we dont have one yet """
@@ -181,28 +193,44 @@ class TokenHandler:
         self._refresh_event.set()
         logger.debug(f"_token_refresher started...")
         while self._running:
+            if not self._token or 'expires_time' not in self._token:
+                logger.error("_token_refresher has no token with an expires_time; "
+                             "call login() first")
+                break
             time_left = self._token['expires_time'] - time.time()-60
             logger.debug(f"Token expires in {time_left} seconds...")
             if time_left <= 0:
                 # pause 'self.get_token'
                 self._refresh_event.clear()
-                # refresh token
-                await self._refresh_token()
+                try:
+                    # refresh token
+                    await self._refresh_token()
+                except Exception as e:
+                    # Let callers continue with the token in hand: Spotify answers the
+                    # request with its own error instead of this task hanging.
+                    logger.error(f"Refreshing token failed: {e}. Call login(reauth=True) "
+                                 "to authorize again.")
+                    self._refresh_event.set()
+                    break
                 # resume 'self.get_token'
                 self._refresh_event.set()
                 continue # skip sleep to get new time_left
             await asyncio.sleep(time_left)
 
     async def _run(self):
-        self._refresh_task = None
         self._refresh_task = asyncio.create_task(self._token_refresher())
 
     async def stop(self):
+        """ Stop the refresh task and the callback server. """
         self._running = False
-        try:
-            await asyncio.wait_for(self._refresh_task, timeout=15)
-        except TimeoutError:
-            logger.warning('The task was cancelled due to a timeout')
+        if self._refresh_task is not None:
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
+            except asyncio.CancelledError:
+                pass
+            self._refresh_task = None
+        await self.server.stop()
 
     async def _login(self, token=None, reauth=False):
         """ Checks storage for saved token, gets new token if one isnt found. Starts the token refresher task.
