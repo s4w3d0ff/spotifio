@@ -5,6 +5,11 @@ Async Spotify Api Wrapper
 pip install spotifio
 ```
 
+Needs Python 3.10 or newer. The HTTP dependency is `aiohttp>=3.14.4`: 3.14.3 and
+older are vulnerable to CVE-2026-111064 (affects the local OAuth callback server)
+and CVE-2026-69244 (affects every API request). The floor is a security floor, not
+a feature request.
+
 ```python
 from spotifio import Client
 
@@ -26,8 +31,8 @@ if __name__ == '__main__':
 
 ## Upgrading from 0.1.x
 
-Three things can affect existing code. Everything else — method names, argument
-order, return payloads, dependencies, Python version — is unchanged.
+These are the changes that can affect existing code. Method names, positional
+argument order and response payloads are unchanged.
 
 1. **`redirect_uri` must be supplied** (argument or `SPOTIFIO_REDIRECT_URI`).
    0.1.7 defaulted to `http://localhost:8888/callback`. Spotify rejects
@@ -38,17 +43,37 @@ order, return payloads, dependencies, Python version — is unchanged.
 2. **`client_id` and `client_secret` must be supplied.** 0.1.7 accepted their
    absence and failed later with an opaque `401`. Now it is a `ValueError` at
    construction naming the argument and the environment variable.
-3. **Failed requests raise `spotifio.client.SpotifyError`** instead of a plain
-   `Exception`. It subclasses `Exception` and keeps the old message text
+3. **Failed requests raise `spotifio.SpotifyError`** instead of a plain
+   `Exception`. It subclasses `Exception` and keeps the old message wording
    (`Request failed with status 404: ...`), so `except Exception` and handling
    that matches on the message keep working. `.status`, `.reason` and `.body`
-   are additions.
+   are additions. It is exported from the package root (`from spotifio import
+   SpotifyError`) and lives in `spotifio/errors.py`, so
+   `from spotifio.client import SpotifyError` no longer works.
+4. **`Python 3.10` and `aiohttp>=3.14.4` are now required.** `python_requires` said
+   3.7 while `aiohttp>=3.8.0` cannot install on Python 3.12 or newer, so that
+   combination was never installable as advertised.
+5. **A scope check raises `spotifio.ScopeError`** instead of a bare `Exception`.
+   `except Exception` still catches it.
+6. **A success answer that is not JSON now returns `bytes`.** It used to return the
+   aiohttp response object after that response was already closed, which no caller
+   could read.
+7. **A failed token refresh raises `SpotifyError`** telling you to call
+   `login(reauth=True)`. It used to fall back to the interactive browser flow,
+   which blocks forever in a headless process.
+8. **`load_dotenv()` rejects a malformed `.env` line** with an error naming
+   `path:lineno`. It used to accept any line containing `=` and store the junk.
+9. **Requests share one aiohttp session.** It is opened on the first request and
+   closed by `await client.close()` or by `async with`. A client that is dropped
+   without closing leaks the session until garbage collection.
 
-One deliberate semantic change: a scope check now looks at the scopes Spotify
-actually granted the token, not only the list passed to the constructor. A call
-that used to be blocked locally goes through when the token really has the
-scope. If your code relied on that local check as a hard "do not write" policy,
-enforce the policy yourself.
+One deliberate semantic change: a scope check looks at the scopes Spotify actually
+granted the token, not only the list passed to the constructor. A call that used to
+be blocked locally goes through when the token really has the scope. Where an
+endpoint accepts either of two scopes, the requirement is now satisfied by either
+one: a token holding only `playlist-modify-private` can write to a public playlist.
+If your code relied on the local check as a hard "do not write" policy, enforce the
+policy yourself.
 
 Additive only, no action needed: `login(reauth=True)`, the new methods for the
 documented replacement endpoints, and error messages that name the documented
@@ -74,7 +99,12 @@ the instance is created.
 An argument always wins over the environment, so existing code that passes
 these values keeps working unchanged. `scope` may legitimately be empty: an
 empty list means "no scopes", which is enough for app-only calls. A method that
-needs a scope raises and names the scope.
+needs a scope raises `spotifio.ScopeError` and names the scope.
+
+`.env.example` in the repo lists all four with the format each one needs; copy it
+to `.env`. Keep one variable per line and keep the final newline: a file whose last
+line has no newline glues the last two variables onto one line, and `load_dotenv()`
+rejects such a line instead of storing a broken secret.
 
 spotifio does not read a `.env` file by itself. If you keep your settings in
 one, load it explicitly:
@@ -87,6 +117,24 @@ c = spotifio.Client()            # everything from the environment
 ```
 
 or export them in the shell: `set -a; . ./.env; set +a`.
+
+## Sessions
+
+One aiohttp session serves every request a client makes, so a burst of calls reuses
+the connection instead of doing a new TCP handshake and TLS setup each time. Close
+it when the client is done:
+
+```python
+async with spotifio.Client() as c:
+    print(await c.get_current_user())
+
+# or
+
+c = spotifio.Client()
+await c.login()
+print(await c.get_current_user())
+await c.close()
+```
 
 ## Redirect URIs
 
@@ -183,6 +231,22 @@ Fields removed from responses: `track.linked_from`, `track.isPlayable`,
 
 ## Errors
 
-Failed requests raise `spotifio.client.SpotifyError` with `.status` and
-`.reason`. Spotify sometimes answers with no message at all (for example
+Failed requests raise `spotifio.SpotifyError` with `.status`, `.reason` and `.body`.
+Spotify sometimes answers with no message at all (for example
 `{"error":{"status":403}}`); `.reason` then explains the likely cause.
+`spotifio.ScopeError` is raised before a request when the token lacks a scope the
+endpoint needs, so it never reaches Spotify.
+
+A 401 refreshes the token once and retries; a 429 waits `Retry-After` and retries.
+`RequestHandler.MAX_ATTEMPTS` (6) bounds both, and the error you get carries the
+last status Spotify actually sent.
+
+## Tests
+
+```
+python -m pytest
+```
+
+The suite needs no Spotify credentials and makes no request outside 127.0.0.1: the
+HTTP tests run against a local aiohttp server. CI runs it on Python 3.10 through
+3.14 for every pull request.

@@ -23,9 +23,12 @@
   does not exist; it is `Client` / `RequestHandler` / `TokenHandler`.
 - **Never commit credentials or account-specific config.** `SPOTIFIO_CLIENT_ID`,
   `SPOTIFIO_CLIENT_SECRET` and `SPOTIFIO_REDIRECT_URI` live in `.env`
-  (gitignored, mode 600, file must end with a newline or the last two
-  variables get glued into one). No key, token, or `db/` output in any commit
-  or PR body. New config values go in `.env`, never hardcoded in the library.
+  (gitignored, mode 600; copy `.env.example`). A `.env` whose last line has no
+  newline glues the last two variables onto one line: `spotifio.load_dotenv()`
+  now rejects such a line with `path:lineno` instead of storing a broken secret.
+  No key, token, or `db/` output in any commit or PR body. New config values go
+  in `.env`, never hardcoded in the library, and are added to `.env.example` in
+  the same commit.
 - **Test only read-only endpoints.** No library, playlist, follow, or playback
   mutations against the maintainer's personal account.
 - **Docs first, never probe in the dark.** Resolve every endpoint question from
@@ -39,6 +42,13 @@
 - **Repo contains the library only.** No diagnostic scripts, OAuth probes, or
   helper tooling in the repo — the maintainer does not want it. Any debugging
   script lives outside the repo (e.g. `/tmp/spotifio-scratch/`).
+- **Behaviour gets a test in the same commit.** `python -m pytest` runs the
+  suite; it needs no Spotify credentials, no real network and no outbound
+  requests (only 127.0.0.1 loopback servers), so it never touches the account
+  rules above. CI runs it on Python 3.10-3.14 for every pull request.
+  `requirements.txt` holds the aiohttp floor because older aiohttp is
+  vulnerable (CVE-2026-111064, CVE-2026-69244): lowering it needs an explicit
+  reason in the PR body.
 - **Verify your own work by reading it back.** `gh api -f body=@file` posts the
   literal string `@file`; use `jq -Rs '{body: .}' file > /tmp/in.json` with
   `gh api --input /tmp/in.json`, then confirm with `gh pr view --json body`.
