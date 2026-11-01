@@ -71,26 +71,62 @@ Spotify no longer accepts `localhost` as a redirect host. Use the loopback IP
 literal (`http://127.0.0.1:PORT/callback` or `http://[::1]:PORT/callback`) or
 HTTPS; spotifio raises `ValueError` if you pass `localhost`.
 
-## Endpoints removed by Spotify
+## Deprecated endpoints
 
-These spotifio methods now raise `SpotifyError(410, ...)` instead of calling an
-endpoint Spotify has removed:
+The Spotify Web API reference marks these endpoints deprecated. spotifio still
+calls them — availability differs per app and per account — but when one fails
+with 403, 404 or 410 the `SpotifyError` message names the endpoint the docs
+point at instead, so you are not left guessing:
 
-| method | Spotify status |
+```
+Request failed with status 404: resource not found, or the endpoint has been
+removed [PUT me/tracks is deprecated by Spotify, use PUT /me/library (Save
+Items to User's Library)]
+```
+
+| deprecated by the docs | documented replacement |
 |---|---|
-| `get_track_audio_features`, `get_several_audio_features` | 403 |
-| `get_track_audio_analysis` | 403 |
-| `get_artist_related_artists` | 404 |
-| `get_featured_playlists` | 404 |
-| `get_category_playlists` | 404 |
-| `get_available_genre_seeds` | 404 |
+| `PUT`/`DELETE /me/tracks`, `/me/albums`, `/me/shows`, `/me/episodes`, `/me/audiobooks` | `PUT`/`DELETE /me/library` |
+| `GET /me/tracks/contains`, `/me/albums/contains`, `/me/shows/contains`, `/me/episodes/contains`, `/me/audiobooks/contains` | `GET /me/library/contains` |
+| `GET`/`POST`/`PUT`/`DELETE /playlists/{id}/tracks` | `GET`/`POST`/`PUT`/`DELETE /playlists/{id}/items` |
+| `PUT`/`DELETE /playlists/{id}/followers`, `GET /playlists/{id}/followers/contains` | none documented |
+| `PUT`/`DELETE /me/following`, `GET /me/following/contains` | none documented |
+| `GET /users/{id}`, `GET /users/{id}/playlists`, `POST /users/{id}/playlists` | `GET /me/playlists`, `POST /me/playlists` |
+| batch `GET /tracks`, `/albums`, `/artists`, `/episodes`, `/shows`, `/chapters`, `/audiobooks` | request the items one by one |
+| `GET /audio-features`, `GET /audio-features/{id}`, `GET /audio-analysis/{id}` | none documented |
+| `GET /artists/{id}/related-artists`, `GET /artists/{id}/top-tracks` | none documented |
+| `GET /browse/featured-playlists`, `GET /browse/categories`, `GET /browse/categories/{id}`, `GET /browse/categories/{id}/playlists`, `GET /browse/new-releases` | none documented |
+| `GET /recommendations`, `GET /recommendations/available-genre-seeds` | none documented |
+| `GET /markets` | none documented |
 
-### Also gone: recommendations
+Not deprecated, and unchanged in spotifio: `GET /me/tracks`, `/me/albums`,
+`/me/shows`, `/me/episodes`, `/me/audiobooks`, `/me/following` (reading your
+library), everything under `/me/player`, `GET /me/top/{type}`, `GET /me/playlists`,
+`POST /me/playlists`, `GET /search`, `GET /playlists/{id}`, and the new
+`/me/library` and `/playlists/{id}/items` endpoints.
 
-Spotify removed `GET /recommendations` (it answers 404 with no message), so
-there is no replacement for the old `create_recommendations` call.
+## New methods for the documented replacements
 
-## Changed behaviour (verified 2026-11-01)
+```python
+await c.save_library_items(["spotify:track:4iV5W9uYEdYUVa79Axb7Rh",
+                            "spotify:album:5zyTDF0mqt23UU6rphZlWl"])   # PUT /me/library
+await c.remove_library_items(["spotify:track:4iV5W9uYEdYUVa79Axb7Rh"])  # DELETE /me/library
+await c.check_saved_items(["spotify:track:4iV5W9uYEdYUVa79Axb7Rh"])     # GET /me/library/contains
+
+items = await c.get_playlist_items(playlist_id, limit=50)               # GET .../items
+await c.add_playlist_items(playlist_id, ["spotify:track:4iV5W9uYEdYUVa79Axb7Rh"])
+await c.remove_playlist_items(playlist_id, [{"uri": "spotify:track:4iV5W9uYEdYUVa79Axb7Rh"}])
+await c.update_playlist_items(playlist_id, range_start=1, insert_before=3, range_length=2)
+```
+
+`get_playlist_items` returns tracks and episodes together; pass
+`additional_types` or `fields` if you need to narrow it. The old per-type and
+per-playlist methods still exist so existing code keeps running.
+
+## Behaviour observed with this app (2026-11-01)
+
+What follows is what this app's own credentials got back, not a claim about
+every app. The deprecated/replacement table above comes from the docs.
 
 - Playlists: Spotify's own editorial playlists (`37i9dQZF...`) return 404, and
   `search(type="playlist")` returns `null` items, so `get_playlist` /
@@ -101,8 +137,8 @@ there is no replacement for the old `create_recommendations` call.
   `/chapters`, `/audiobooks`) require `ids`; without them they return 400
   "Missing required field: ids".
 - Spotify answers **410** for a malformed request path (for example a base URL
-  built without a separating slash). spotifio also raises status 410 itself for
-  the removed endpoints above.
+  built without a separating slash). spotifio no longer raises 410 itself; the
+  status you see is the status Spotify sent.
 - `GET /me` with an app-only token returns 401 "Valid user authentication
   required"; `me/player/currently-playing` answers 404 "Invalid username".
 - Public profiles: `GET /users/{id}` still works for some accounts and returns
@@ -118,8 +154,6 @@ Fields removed from responses: `track.linked_from`, `track.isPlayable`,
 - `redirect_uri` has no default. Code that relied on the old
   `http://localhost:8888/callback` default must pass a redirect URI, and it must
   be one registered for your app (`localhost` is rejected by Spotify).
-- The endpoints Spotify removed raise `SpotifyError` with status 410 instead of
-  issuing a request that answers 403 or 404.
 - Failed requests raise `spotifio.client.SpotifyError` instead of a plain
   `Exception`. `SpotifyError` subclasses `Exception` and its message keeps the
   old wording (`Request failed with status 404: ...`), so `except Exception`

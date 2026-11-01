@@ -1,4 +1,5 @@
 import logging
+import re
 import aiohttp
 import asyncio
 from .oauth import TokenHandler
@@ -23,20 +24,64 @@ _FAILURE_HINTS = {
     401: "invalid or expired token",
     403: "forbidden - endpoint deprecated, or this app is not allowed to call it",
     404: "resource not found, or the endpoint has been removed",
-    # Spotify itself answers 410 for a malformed request path (e.g. a base URL
-    # built without a separating slash). spotifio also raises status 410 itself
-    # for endpoints Spotify has removed - see REMOVED_ENDPOINTS.
-    410: "gone - Spotify returns this for a malformed request path, or the endpoint is gone",
+    410: "gone - Spotify answers this for a malformed request path (a base URL built "
+         "without a separating slash does this), or the endpoint is gone",
     429: "rate limited",
 }
 
-REMOVED_ENDPOINTS = {
-    'audio-features': "Spotify removed the audio features endpoints (now return 403 with no message).",
-    'audio-analysis': "Spotify removed the audio analysis endpoint (now returns 403 with no message).",
-    'related-artists': "Spotify removed Get Artist's Related Artists (now 404 Not Found).",
-    'featured-playlists': "Spotify removed Get Featured Playlists (now 404 Not Found).",
-    'available-genre-seeds': "Spotify removed the recommendations endpoints (now 404).",
-}
+# Endpoints the Spotify Web API reference marks deprecated, and what the docs
+# say to use instead. Source: developer.spotify.com/documentation/web-api/reference
+# (the "deprecated" flag on each endpoint) and the Web API changelog.
+# Matched with fullmatch against the concrete path spotifio requests, so
+# 'me/tracks' (still documented as valid) is never confused with the deprecated
+# save/remove variants of the same path.
+_DEPRECATED_PATTERNS = [
+    ('GET', r'audio-features(/.*)?', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'audio-analysis/[^/]+', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'artists/[^/]+/related-artists', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'artists/[^/]+/top-tracks', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'browse/featured-playlists', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'browse/categories(/.*)?', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'browse/new-releases', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'recommendations(/.*)?', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'markets', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'users/[^/]+', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'users/[^/]+/playlists', "deprecated by Spotify, use GET /me/playlists"),
+    ('POST', r'users/[^/]+/playlists', "deprecated by Spotify, use POST /me/playlists"),
+    ('GET', r'(albums|artists|audiobooks|chapters|episodes|shows|tracks)',
+     "deprecated by Spotify as a batch lookup, request the items one by one"),
+    ('PUT', r'me/(albums|audiobooks|episodes|shows|tracks)',
+     "deprecated by Spotify, use PUT /me/library (Save Items to User's Library)"),
+    ('DELETE', r'me/(albums|audiobooks|episodes|shows|tracks)',
+     "deprecated by Spotify, use DELETE /me/library (Remove Items from User's Library)"),
+    ('GET', r'me/(albums|audiobooks|episodes|shows|tracks)/contains',
+     "deprecated by Spotify, use GET /me/library/contains"),
+    ('PUT', r'me/following', "deprecated by Spotify, no replacement documented"),
+    ('DELETE', r'me/following', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'me/following/contains', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'playlists/[^/]+/tracks',
+     "deprecated by Spotify, use GET /playlists/{playlist_id}/items (Get Playlist Items)"),
+    ('POST', r'playlists/[^/]+/tracks',
+     "deprecated by Spotify, use POST /playlists/{playlist_id}/items (Add Items to Playlist)"),
+    ('DELETE', r'playlists/[^/]+/tracks',
+     "deprecated by Spotify, use DELETE /playlists/{playlist_id}/items (Remove Playlist Items)"),
+    ('PUT', r'playlists/[^/]+/tracks',
+     "deprecated by Spotify, use PUT /playlists/{playlist_id}/items (Update Playlist Items)"),
+    ('PUT', r'playlists/[^/]+/followers', "deprecated by Spotify, no replacement documented"),
+    ('DELETE', r'playlists/[^/]+/followers', "deprecated by Spotify, no replacement documented"),
+    ('GET', r'playlists/[^/]+/followers/contains',
+     "deprecated by Spotify, no replacement documented"),
+]
+
+
+def _deprecation_note(method, endpoint):
+    """Docs note for a deprecated endpoint, or None if the docs do not mark it
+    deprecated."""
+    path = endpoint.lstrip('/')
+    for req_method, pattern, note in _DEPRECATED_PATTERNS:
+        if req_method == method and re.fullmatch(pattern, path):
+            return note
+    return None
 
 class RequestHandler:
     SCOPE_REQUIREMENTS = {
@@ -90,6 +135,15 @@ class RequestHandler:
         'save_tracks': ['user-library-modify'],
         'remove_saved_tracks': ['user-library-modify'],
         'check_saved_tracks': ['user-library-read'],
+        ### LIBRARY ITEMS (replaces the per-type save/remove/contains endpoints) ---
+        'save_library_items': ['user-library-modify'],
+        'remove_library_items': ['user-library-modify'],
+        'check_saved_items': ['user-library-read'],
+        ### PLAYLIST ITEMS (replaces the per-playlist tracks endpoints) -----------
+        'get_playlist_items': ['playlist-read-private'],
+        'add_playlist_items': ['playlist-modify-public'],
+        'remove_playlist_items': ['playlist-modify-public'],
+        'update_playlist_items': ['playlist-modify-public'],
         'get_track_audio_features': [],
         'get_several_audio_features': [],
         'get_track_audio_analysis': [],
@@ -213,6 +267,11 @@ class RequestHandler:
                         # Spotify now answers some failures with a bare status, e.g. {"error":{"status":403}}
                         if not reason:
                             reason = _FAILURE_HINTS.get(resp.status, "no message returned by Spotify")
+                        # If the docs mark this endpoint deprecated, say so and name
+                        # the endpoint the docs point at instead of guessing.
+                        note = _deprecation_note(method, endpoint)
+                        if note and resp.status in (403, 404, 410):
+                            reason = f"{reason} [{method} {endpoint} is {note}]"
                         raise SpotifyError(resp.status, reason, error_text)
                     try:
                         return await resp.json()
@@ -417,6 +476,56 @@ class Client(RequestHandler):
             params['fields'] = fields
         return await self._request('GET', f'playlists/{playlist_id}', params=params)
 
+    async def get_playlist_items(self, playlist_id, market=None, fields=None, limit=20,
+                                 offset=0, additional_types=None):
+        """GET /playlists/{playlist_id}/items: the endpoint the docs list as the
+        replacement for GET /playlists/{playlist_id}/tracks. Unlike the tracks
+        endpoint it returns tracks and episodes together."""
+        await self._check_scope('get_playlist_items')
+        params = {
+            'limit': limit,
+            'offset': offset
+        }
+        if market:
+            params['market'] = market
+        if fields:
+            params['fields'] = fields
+        if additional_types:
+            params['additional_types'] = additional_types
+        return await self._request('GET', f'playlists/{playlist_id}/items', params=params)
+
+    async def add_playlist_items(self, playlist_id, uris, position=None):
+        """POST /playlists/{playlist_id}/items: replacement for the deprecated
+        POST /playlists/{playlist_id}/tracks."""
+        await self._check_scope('add_playlist_items')
+        params = {'uris': ','.join(uris)}
+        if position is not None:
+            params['position'] = position
+        return await self._request('POST', f'playlists/{playlist_id}/items', params=params)
+
+    async def remove_playlist_items(self, playlist_id, items):
+        """DELETE /playlists/{playlist_id}/items: replacement for the deprecated
+        DELETE /playlists/{playlist_id}/tracks. `items` is a list of objects as the
+        docs require, e.g. [{'uri': 'spotify:track:4iV5W9uYEdYUVa79Axb7Rh'}]."""
+        await self._check_scope('remove_playlist_items')
+        return await self._request('DELETE', f'playlists/{playlist_id}/items', data={'items': items})
+
+    async def update_playlist_items(self, playlist_id, uris=None, range_start=None,
+                                    insert_before=None, range_length=None, snapshot_id=None):
+        """PUT /playlists/{playlist_id}/items: replacement for the deprecated
+        reorder/replace endpoint. Pass uris to replace items, or range_start,
+        insert_before, range_length and snapshot_id to reorder them."""
+        await self._check_scope('update_playlist_items')
+        params = {}
+        if uris:
+            params['uris'] = ','.join(uris)
+        data = {}
+        for key, value in (('range_start', range_start), ('insert_before', insert_before),
+                           ('range_length', range_length), ('snapshot_id', snapshot_id)):
+            if value is not None:
+                data[key] = value
+        return await self._request('PUT', f'playlists/{playlist_id}/items', params=params, data=data or None)
+
     async def change_playlist_details(self, playlist_id, name=None, public=None, collaborative=None, description=None):
         await self._check_scope('change_playlist_details')
         data = {}
@@ -489,10 +598,8 @@ class Client(RequestHandler):
         return await self._request('POST', f'users/{user_id}/playlists', data=data)
 
     async def get_featured_playlists(self, locale=None, country=None, limit=20, offset=0):
-        raise SpotifyError(410, REMOVED_ENDPOINTS['featured-playlists'])
-
-    # kept for reference; Spotify returns 404 for this endpoint now
-    async def _get_featured_playlists(self, locale=None, country=None, limit=20, offset=0):
+        """Deprecated in the Spotify docs and answered 404 in practice. The request is
+        still made so the caller gets a SpotifyError naming the deprecation."""
         await self._check_scope('get_featured_playlists')
         params = {
             'limit': limit,
@@ -505,10 +612,8 @@ class Client(RequestHandler):
         return await self._request('GET', 'browse/featured-playlists', params=params)
 
     async def get_category_playlists(self, category_id, country=None, limit=20, offset=0):
-        raise SpotifyError(410, "Spotify removed Get Category's Playlists (now 404 Not Found). Use get_category() or search() instead.")
-
-    # kept for reference; Spotify returns 404 for this endpoint now
-    async def _get_category_playlists(self, category_id, country=None, limit=20, offset=0):
+        """Deprecated in the Spotify docs and answered 404 in practice. The request is
+        still made so the caller gets a SpotifyError naming the deprecation."""
         await self._check_scope('get_category_playlists')
         params = {
             'limit': limit,
@@ -571,14 +676,39 @@ class Client(RequestHandler):
         params = {'ids': ','.join(track_ids)}
         return await self._request('GET', 'me/tracks/contains', params=params)
 
+    async def save_library_items(self, uris):
+        """PUT /me/library: the endpoint the docs list as the replacement for saving
+        tracks, albums, shows, episodes and audiobooks to the library.
+        `uris` is a list of Spotify URIs, e.g. ['spotify:track:4iV5W9uYEdYUVa79Axb7Rh']."""
+        await self._check_scope('save_library_items')
+        return await self._request('PUT', 'me/library', params={'uris': ','.join(uris)})
+
+    async def remove_library_items(self, uris):
+        """DELETE /me/library: replacement for the per-type remove endpoints."""
+        await self._check_scope('remove_library_items')
+        return await self._request('DELETE', 'me/library', params={'uris': ','.join(uris)})
+
+    async def check_saved_items(self, uris):
+        """GET /me/library/contains: replacement for the per-type contains endpoints."""
+        await self._check_scope('check_saved_items')
+        return await self._request('GET', 'me/library/contains', params={'uris': ','.join(uris)})
+
     async def get_track_audio_features(self, track_id):
-        raise SpotifyError(410, REMOVED_ENDPOINTS['audio-features'])
+        """Deprecated in the Spotify docs; Spotify answers 403 with no message. No
+        replacement is documented."""
+        await self._check_scope('get_track_audio_features')
+        return await self._request('GET', f'audio-features/{track_id}')
 
     async def get_several_audio_features(self, track_ids):
-        raise SpotifyError(410, REMOVED_ENDPOINTS['audio-features'])
+        """Deprecated in the Spotify docs; Spotify answers 403 with no message."""
+        await self._check_scope('get_several_audio_features')
+        params = {'ids': ','.join(track_ids)}
+        return await self._request('GET', 'audio-features', params=params)
 
     async def get_track_audio_analysis(self, track_id):
-        raise SpotifyError(410, REMOVED_ENDPOINTS['audio-analysis'])
+        """Deprecated in the Spotify docs; Spotify answers 403 with no message."""
+        await self._check_scope('get_track_audio_analysis')
+        return await self._request('GET', f'audio-analysis/{track_id}')
 
 
     ### ALBUMS Methods ------------------------------------
@@ -667,7 +797,10 @@ class Client(RequestHandler):
         return await self._request('GET', f'artists/{artist_id}/top-tracks', params=params)
 
     async def get_artist_related_artists(self, artist_id):
-        raise SpotifyError(410, REMOVED_ENDPOINTS['related-artists'])
+        """Deprecated in the Spotify docs; Spotify answers 404. No replacement is
+        documented."""
+        await self._check_scope('get_artist_related_artists')
+        return await self._request('GET', f'artists/{artist_id}/related-artists')
 
     ### AUDIOBOOKS Methods -------------------------------
     async def get_audiobook(self, audiobook_id, market=None):
@@ -792,7 +925,10 @@ class Client(RequestHandler):
 
     ### GENRES Methods ------------------------------------
     async def get_available_genre_seeds(self):
-        raise SpotifyError(410, REMOVED_ENDPOINTS['available-genre-seeds'])
+        """Deprecated in the Spotify docs along with /recommendations; Spotify answers
+        404. No replacement is documented."""
+        await self._check_scope('get_available_genre_seeds')
+        return await self._request('GET', 'recommendations/available-genre-seeds')
 
     ### MARKETS Methods ------------------------------------
     async def get_available_markets(self):
