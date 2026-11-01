@@ -23,6 +23,10 @@ _FAILURE_HINTS = {
     401: "invalid or expired token",
     403: "forbidden - endpoint deprecated, or this app is not allowed to call it",
     404: "resource not found, or the endpoint has been removed",
+    # Spotify itself answers 410 for a malformed request path (e.g. a base URL
+    # built without a separating slash). spotifio also raises status 410 itself
+    # for endpoints Spotify has removed - see REMOVED_ENDPOINTS.
+    410: "gone - Spotify returns this for a malformed request path, or the endpoint is gone",
     429: "rate limited",
 }
 
@@ -387,6 +391,9 @@ class Client(RequestHandler):
 
     ### PLAYLIST Methods -----------------------------------
     async def get_playlist(self, playlist_id, market=None, fields=None):
+        """Spotify no longer serves its own editorial playlists (37i9dQZF...) through
+        the web API: they answer 404 with an app-only token. Private playlists of
+        another account need a user token of an account that may read them."""
         await self._check_scope('get_playlist')
         params = {}
         if market:

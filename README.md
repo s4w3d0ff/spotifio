@@ -53,9 +53,33 @@ endpoint Spotify has removed:
 | `get_category_playlists` | 404 |
 | `get_available_genre_seeds` | 404 |
 
-`get_user_profile` and `get_user_playlists` still call Spotify but now return
-404 for most accounts; use `get_current_user()` for your own profile (the
-`account_id` field added in May 2026 is the stable public identifier).
+### Also gone: recommendations
+
+Spotify removed `GET /recommendations` (it answers 404 with no message), so
+there is no replacement for the old `create_recommendations` call.
+
+## Changed behaviour (verified 2026-11-01)
+
+- Playlists: Spotify's own editorial playlists (`37i9dQZF...`) return 404, and
+  `search(type="playlist")` returns `null` items, so `get_playlist` /
+  `get_playlist_tracks` can no longer read them with an app-only token. Private
+  playlists still need a user token that is allowed to read them.
+- `get_new_releases` answers 200 with an empty `playlists` array.
+- Batch endpoints (`/tracks`, `/albums`, `/artists`, `/episodes`, `/shows`,
+  `/chapters`, `/audiobooks`) require `ids`; without them they return 400
+  "Missing required field: ids".
+- Spotify answers **410** for a malformed request path (for example a base URL
+  built without a separating slash). spotifio also raises status 410 itself for
+  the removed endpoints above.
+- `GET /me` with an app-only token returns 401 "Valid user authentication
+  required"; `me/player/currently-playing` answers 404 "Invalid username".
+- Public profiles: `GET /users/{id}` still works for some accounts and returns
+  404 for others. Use `get_current_user()` for your own profile — its
+  `account_id` field (added May 2026) is the stable public identifier.
+
+Fields removed from responses: `track.linked_from`, `track.isPlayable`,
+`album.album_group`. Still present: `available_markets`, `external_ids`,
+`popularity`, `album.label`, `artist.followers`.
 
 ## Errors
 
