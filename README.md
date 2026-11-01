@@ -24,6 +24,38 @@ if __name__ == '__main__':
     asyncio.run(main())
 ```
 
+## Configuration
+
+Everything spotifio needs to reach Spotify comes from an argument or from the
+environment. There are no defaults: no default port, no default host, no
+default redirect URI. A value that has to match your Spotify app settings
+exactly cannot be guessed for you, so a missing one raises `ValueError` when
+the instance is created.
+
+| argument | environment variable |
+|---|---|
+| `client_id` | `SPOTIFIO_CLIENT_ID` |
+| `client_secret` | `SPOTIFIO_CLIENT_SECRET` |
+| `redirect_uri` | `SPOTIFIO_REDIRECT_URI` |
+| `scope` | `SPOTIFIO_SCOPES` (space or comma separated) |
+
+An argument always wins over the environment, so existing code that passes
+these values keeps working unchanged. `scope` may legitimately be empty: an
+empty list means "no scopes", which is enough for app-only calls. A method that
+needs a scope raises and names the scope.
+
+spotifio does not read a `.env` file by itself. If you keep your settings in
+one, load it explicitly:
+
+```python
+import spotifio
+
+spotifio.load_dotenv()          # reads ./.env into os.environ, existing vars win
+c = spotifio.Client()            # everything from the environment
+```
+
+or export them in the shell: `set -a; . ./.env; set +a`.
+
 ## Redirect URIs
 
 `redirect_uri` is required: there is no default. Pass it to `Client(...)` /
@@ -80,6 +112,19 @@ there is no replacement for the old `create_recommendations` call.
 Fields removed from responses: `track.linked_from`, `track.isPlayable`,
 `album.album_group`. Still present: `available_markets`, `external_ids`,
 `popularity`, `album.label`, `artist.followers`.
+
+## Breaking changes in 0.2.0
+
+- `redirect_uri` has no default. Code that relied on the old
+  `http://localhost:8888/callback` default must pass a redirect URI, and it must
+  be one registered for your app (`localhost` is rejected by Spotify).
+- The endpoints Spotify removed raise `SpotifyError` with status 410 instead of
+  issuing a request that answers 403 or 404.
+- Failed requests raise `spotifio.client.SpotifyError` instead of a plain
+  `Exception`. `SpotifyError` subclasses `Exception` and its message keeps the
+  old wording (`Request failed with status 404: ...`), so `except Exception`
+  and message parsing still work. `.status`, `.reason` and `.body` are new.
+- `Client.login(reauth=True)` is new; `login()` is unchanged.
 
 ## Errors
 

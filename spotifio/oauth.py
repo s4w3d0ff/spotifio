@@ -7,6 +7,7 @@ import logging
 import time
 from aiohttp import web
 from urllib.parse import urlparse, urlencode
+from .env import require_env
 from .storage import JSONStorage
 
 logger = logging.getLogger(__name__)
@@ -55,25 +56,31 @@ class WebServer:
 
 
 class TokenHandler:
-    def __init__(self, client_id, client_secret, redirect_uri, scope=[], storage=None, *args, **kwargs):
-        self.client_id = client_id
-        self.redirect_uri = redirect_uri or os.environ.get("SPOTIFIO_REDIRECT_URI")
-        if not self.redirect_uri:
-            raise ValueError(
-                "redirect_uri is required: pass it to RequestHandler()/Client() or set "
-                "SPOTIFIO_REDIRECT_URI. It must be identical to a Redirect URI registered "
-                "for your app at https://developer.spotify.com/dashboard (Spotify rejects "
-                "'localhost'; use the loopback IP literal, e.g. http://127.0.0.1:PORT/callback)."
-            )
+    def __init__(self, client_id=None, client_secret=None, redirect_uri=None, scope=None, storage=None, *args, **kwargs):
+        self.client_id = client_id or require_env("SPOTIFIO_CLIENT_ID")
+        self.client_secret = client_secret or require_env("SPOTIFIO_CLIENT_SECRET")
+        self.redirect_uri = redirect_uri or require_env("SPOTIFIO_REDIRECT_URI")
         parsed_uri = urlparse(self.redirect_uri)
         if parsed_uri.scheme not in ("http", "https") or not parsed_uri.hostname or parsed_uri.port is None:
             raise ValueError(
-                f"redirect_uri {self.redirect_uri!r} is not a valid http(s) URL with an explicit "
-                "port, e.g. http://127.0.0.1:5050/callback"
+                f"SPOTIFIO_REDIRECT_URI {self.redirect_uri!r} is not a valid http(s) URL with an explicit "
+                "port, e.g. http://127.0.0.1:5050/spotify_oauth. It must be identical to a Redirect URI "
+                "registered for your app at https://developer.spotify.com/dashboard"
+            )
+        if parsed_uri.hostname == "localhost":
+            raise ValueError(
+                f"SPOTIFIO_REDIRECT_URI {self.redirect_uri!r} uses host 'localhost', which Spotify rejects; "
+                "use the loopback IP literal instead, e.g. http://127.0.0.1:5050/spotify_oauth"
             )
         self.host = parsed_uri.hostname
         self.port = parsed_uri.port
-        self.scope = scope
+        # scopes: an argument, or SPOTIFIO_SCOPES, or none. An empty list is not a
+        # guess - it means the caller asked for no scopes (enough for app-only calls).
+        env_scope = (os.environ.get("SPOTIFIO_SCOPES") or "").replace(",", " ").split()
+        self.scope = list(scope) if scope is not None else env_scope
+        # scopes Spotify actually granted for the current token (from the token
+        # response 'scope' field); empty until a token is obtained
+        self.granted_scopes = set()
         self.storage = storage or JSONStorage(*args, **kwargs)
         self._state = os.urandom(14).hex()
         self._auth_code = None
@@ -81,14 +88,9 @@ class TokenHandler:
         self._token = None
         self._token_url = "https://accounts.spotify.com/api/token"
         self._token_headers = {
-            "Authorization": f"Basic {base64.b64encode(f'{self.client_id}:{client_secret}'.encode()).decode()}",
+            "Authorization": f"Basic {base64.b64encode(f'{self.client_id}:{self.client_secret}'.encode()).decode()}",
             "Content-Type": "application/x-www-form-urlencoded"
         }
-        if parsed_uri.hostname == "localhost":
-            raise ValueError(
-                f"redirect_uri {self.redirect_uri!r} uses host 'localhost', which Spotify rejects; "
-                "use the loopback IP literal instead, e.g. http://127.0.0.1:5050/callback"
-            )
         self.server = WebServer(self.host, self.port)
         self.server.add_route(parsed_uri.path or "/", self._callback_handler)
         # refresh token handler stuff
@@ -143,6 +145,7 @@ class TokenHandler:
                 if "refresh_token" not in self._token and r_token:
                     self._token['refresh_token'] = r_token
                 self._token["expires_time"] = time.time()+int(self._token['expires_in'])
+                self.granted_scopes = set((self._token.get('scope') or "").split())
                 await self.storage.save_token(self._token, name="spotify")
                 return self._token
 
@@ -201,12 +204,15 @@ class TokenHandler:
         except TimeoutError:
             logger.warning('The task was cancelled due to a timeout')
 
-    async def _login(self, token=None):
-        """ Checks storage for saved token, gets new token if one isnt found. Starts the token refresher task."""
+    async def _login(self, token=None, reauth=False):
+        """ Checks storage for saved token, gets new token if one isnt found. Starts the token refresher task.
+        reauth=True ignores the saved token and runs the authorization again, e.g. to
+        get a token for a different set of scopes. """
         logger.debug(f"Attempting to load saved token...")
-        self._token = await self.storage.load_token(name="spotify")
+        self._token = None if reauth else await self.storage.load_token(name="spotify")
         if self._token:
             logger.warning(f"Loaded saved token from storage!")
+            self.granted_scopes = set((self._token.get('scope') or "").split())
         else:
             self._token = await self._get_new_token()
         if not self._running:

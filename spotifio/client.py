@@ -147,15 +147,30 @@ class RequestHandler:
         self.token_handler = token_handler or TokenHandler(*args, **kwargs)
 
     async def _check_scope(self, method_name):
-        current_scopes = set(self.token_handler.scope)
         required_scopes = set(self.SCOPE_REQUIREMENTS.get(method_name, []))
-        missing_scopes = required_scopes - current_scopes
-        if missing_scopes:
-            raise Exception(f"Missing required scopes for {method_name}: {', '.join(missing_scopes)}")
+        if not required_scopes:
+            return
+        configured = set(self.token_handler.scope)
+        missing = required_scopes - configured
+        if missing:
+            raise Exception(
+                f"Missing required scopes for {method_name}: {', '.join(sorted(missing))}. "
+                "Pass scope=[...] to Client()/RequestHandler() or set SPOTIFIO_SCOPES."
+            )
+        granted = self.token_handler.granted_scopes
+        if granted:
+            missing_now = required_scopes - granted
+            if missing_now:
+                raise Exception(
+                    f"The saved token was not authorized for {method_name}: it is missing "
+                    f"{', '.join(sorted(missing_now))}. Add them to SPOTIFIO_SCOPES and call "
+                    "login(reauth=True) to authorize again."
+                )
 
-    async def login(self, token=None):
-        """ Sets up the token """
-        await self.token_handler._login(token)
+    async def login(self, token=None, reauth=False):
+        """ Sets up the token. reauth=True ignores the saved token and authorizes
+        again, e.g. to get a token for a different set of scopes. """
+        await self.token_handler._login(token, reauth=reauth)
     
     async def _request(self, method, endpoint, params=None, data=None, headers=None, _retries=0):
         """ Base Request Method for Spotify API calls """
