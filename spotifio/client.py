@@ -7,6 +7,33 @@ logger = logging.getLogger(__name__)
 
 base_url = "https://api.spotify.com/v1"
 
+class SpotifyError(Exception):
+    """Raised for non-2xx API responses. Carries the HTTP status and reason."""
+    def __init__(self, status, reason, body=None):
+        self.status = status
+        self.reason = reason
+        self.body = body or ""
+        super().__init__(f"Request failed with status {status}: {reason} ({self.body})")
+
+# Endpoints Spotify has removed or deprecated. spotifio raises instead of
+# calling them so callers get a clear message instead of a bare 403/404.
+# Verified against this app on 2026-10-31; see Spotify changelogs Feb-Jul 2026.
+_FAILURE_HINTS = {
+    400: "bad request",
+    401: "invalid or expired token",
+    403: "forbidden - endpoint deprecated, or this app is not allowed to call it",
+    404: "resource not found, or the endpoint has been removed",
+    429: "rate limited",
+}
+
+REMOVED_ENDPOINTS = {
+    'audio-features': "Spotify removed the audio features endpoints (now return 403 with no message).",
+    'audio-analysis': "Spotify removed the audio analysis endpoint (now returns 403 with no message).",
+    'related-artists': "Spotify removed Get Artist's Related Artists (now 404 Not Found).",
+    'featured-playlists': "Spotify removed Get Featured Playlists (now 404 Not Found).",
+    'available-genre-seeds': "Spotify removed the recommendations endpoints (now 404).",
+}
+
 class RequestHandler:
     SCOPE_REQUIREMENTS = {
         ### PLAYER -----------------------------------------
@@ -126,8 +153,10 @@ class RequestHandler:
         """ Sets up the token """
         await self.token_handler._login(token)
     
-    async def _request(self, method, endpoint, params=None, data=None, headers=None):
+    async def _request(self, method, endpoint, params=None, data=None, headers=None, _retries=0):
         """ Base Request Method for Spotify API calls """
+        if _retries > 5:
+            raise SpotifyError(0, f"Giving up on {method} {endpoint} after {_retries} attempts")
         # Get the current valid token
         token = await self.token_handler.get_token()
         # Setup default headers with authorization
@@ -149,15 +178,23 @@ class RequestHandler:
                         return None
                     if resp.status == 401:  # bad token
                         await self.token_handler._refresh_token()
-                        return await self._request(method, endpoint, params, data, headers)
+                        return await self._request(method, endpoint, params, data, headers, _retries + 1)
                     if resp.status == 429:  # Rate limiting
                         retry_after = int(resp.headers.get('Retry-After', 1))
                         logger.warning(f"Rate limited. Waiting {retry_after} seconds")
                         await asyncio.sleep(retry_after)
-                        return await self._request(method, endpoint, params, data, headers)
+                        return await self._request(method, endpoint, params, data, headers, _retries + 1)
                     if not resp.ok:
                         error_text = await resp.text()
-                        raise Exception(f"Request failed with status {resp.status}: {error_text}")
+                        reason = None
+                        try:
+                            reason = (await resp.json()).get('error', {}).get('message')
+                        except Exception:
+                            pass
+                        # Spotify now answers some failures with a bare status, e.g. {"error":{"status":403}}
+                        if not reason:
+                            reason = _FAILURE_HINTS.get(resp.status, "no message returned by Spotify")
+                        raise SpotifyError(resp.status, reason, error_text)
                     try:
                         return await resp.json()
                     except:
@@ -282,6 +319,9 @@ class Client(RequestHandler):
         return await self._request('GET', 'me')
 
     async def get_user_profile(self, user_id):
+        """Spotify returns 404 'Resource not found' for public user profiles now.
+        Use get_current_user() for your own profile (its 'account_id' field is the
+        stable public identifier since the May 2026 changelog)."""
         await self._check_scope('get_user_profile')
         return await self._request('GET', f'users/{user_id}')
 
@@ -414,6 +454,8 @@ class Client(RequestHandler):
         return await self._request('GET', f'users/{user_id}/playlists', params=params)
 
     async def create_playlist(self, user_id, name, public=True, collaborative=False, description=None):
+        """Spotify removed POST /users/{user_id}/playlists in the Feb 2026 changes;
+        create a playlist on 'me' instead (pass your own user id or 'me')."""
         await self._check_scope('create_playlist')
         data = {
             'name': name,
@@ -425,6 +467,10 @@ class Client(RequestHandler):
         return await self._request('POST', f'users/{user_id}/playlists', data=data)
 
     async def get_featured_playlists(self, locale=None, country=None, limit=20, offset=0):
+        raise SpotifyError(410, REMOVED_ENDPOINTS['featured-playlists'])
+
+    # kept for reference; Spotify returns 404 for this endpoint now
+    async def _get_featured_playlists(self, locale=None, country=None, limit=20, offset=0):
         await self._check_scope('get_featured_playlists')
         params = {
             'limit': limit,
@@ -437,6 +483,10 @@ class Client(RequestHandler):
         return await self._request('GET', 'browse/featured-playlists', params=params)
 
     async def get_category_playlists(self, category_id, country=None, limit=20, offset=0):
+        raise SpotifyError(410, "Spotify removed Get Category's Playlists (now 404 Not Found). Use get_category() or search() instead.")
+
+    # kept for reference; Spotify returns 404 for this endpoint now
+    async def _get_category_playlists(self, category_id, country=None, limit=20, offset=0):
         await self._check_scope('get_category_playlists')
         params = {
             'limit': limit,
@@ -500,17 +550,13 @@ class Client(RequestHandler):
         return await self._request('GET', 'me/tracks/contains', params=params)
 
     async def get_track_audio_features(self, track_id):
-        await self._check_scope('get_track_audio_features')
-        return await self._request('GET', f'audio-features/{track_id}')
+        raise SpotifyError(410, REMOVED_ENDPOINTS['audio-features'])
 
     async def get_several_audio_features(self, track_ids):
-        await self._check_scope('get_several_audio_features')
-        params = {'ids': ','.join(track_ids)}
-        return await self._request('GET', 'audio-features', params=params)
+        raise SpotifyError(410, REMOVED_ENDPOINTS['audio-features'])
 
     async def get_track_audio_analysis(self, track_id):
-        await self._check_scope('get_track_audio_analysis')
-        return await self._request('GET', f'audio-analysis/{track_id}')
+        raise SpotifyError(410, REMOVED_ENDPOINTS['audio-analysis'])
 
 
     ### ALBUMS Methods ------------------------------------
@@ -599,8 +645,7 @@ class Client(RequestHandler):
         return await self._request('GET', f'artists/{artist_id}/top-tracks', params=params)
 
     async def get_artist_related_artists(self, artist_id):
-        await self._check_scope('get_artist_related_artists')
-        return await self._request('GET', f'artists/{artist_id}/related-artists')
+        raise SpotifyError(410, REMOVED_ENDPOINTS['related-artists'])
 
     ### AUDIOBOOKS Methods -------------------------------
     async def get_audiobook(self, audiobook_id, market=None):
@@ -725,8 +770,7 @@ class Client(RequestHandler):
 
     ### GENRES Methods ------------------------------------
     async def get_available_genre_seeds(self):
-        await self._check_scope('get_available_genre_seeds')
-        return await self._request('GET', 'recommendations/available-genre-seeds')
+        raise SpotifyError(410, REMOVED_ENDPOINTS['available-genre-seeds'])
 
     ### MARKETS Methods ------------------------------------
     async def get_available_markets(self):

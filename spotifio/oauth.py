@@ -55,9 +55,24 @@ class WebServer:
 
 
 class TokenHandler:
-    def __init__(self, client_id, client_secret, redirect_uri=None, scope=[], storage=None, *args, **kwargs):
+    def __init__(self, client_id, client_secret, redirect_uri, scope=[], storage=None, *args, **kwargs):
         self.client_id = client_id
-        self.redirect_uri = redirect_uri or "http://localhost:8888/callback"
+        self.redirect_uri = redirect_uri or os.environ.get("SPOTIFIO_REDIRECT_URI")
+        if not self.redirect_uri:
+            raise ValueError(
+                "redirect_uri is required: pass it to TokenHandler()/Spotify() or set "
+                "SPOTIFIO_REDIRECT_URI. It must be identical to a Redirect URI registered "
+                "for your app at https://developer.spotify.com/dashboard (Spotify rejects "
+                "'localhost'; use the loopback IP literal, e.g. http://127.0.0.1:PORT/callback)."
+            )
+        parsed_uri = urlparse(self.redirect_uri)
+        if parsed_uri.scheme not in ("http", "https") or not parsed_uri.hostname or parsed_uri.port is None:
+            raise ValueError(
+                f"redirect_uri {self.redirect_uri!r} is not a valid http(s) URL with an explicit "
+                "port, e.g. http://127.0.0.1:5050/callback"
+            )
+        self.host = parsed_uri.hostname
+        self.port = parsed_uri.port
         self.scope = scope
         self.storage = storage or JSONStorage(*args, **kwargs)
         self._state = os.urandom(14).hex()
@@ -69,9 +84,13 @@ class TokenHandler:
             "Authorization": f"Basic {base64.b64encode(f'{self.client_id}:{client_secret}'.encode()).decode()}",
             "Content-Type": "application/x-www-form-urlencoded"
         }
-        parsed_uri = urlparse(self.redirect_uri)
-        self.server = WebServer(parsed_uri.hostname, parsed_uri.port)
-        self.server.add_route(f"/{parsed_uri.path.lstrip('/')}", self._callback_handler)
+        if parsed_uri.hostname == "localhost":
+            raise ValueError(
+                f"redirect_uri {self.redirect_uri!r} uses host 'localhost', which Spotify rejects; "
+                "use the loopback IP literal instead, e.g. http://127.0.0.1:5050/callback"
+            )
+        self.server = WebServer(self.host, self.port)
+        self.server.add_route(parsed_uri.path or "/", self._callback_handler)
         # refresh token handler stuff
         self._refresh_event = asyncio.Event()
         self._refresh_task = None
@@ -114,16 +133,15 @@ class TokenHandler:
 
     async def _token_request(self, data):
         """ Base token request method, used for new or refreshing tokens """
-        if self._token:
-            # temp store refresh token (spotify doesnt always send one)
-            r_token = self._token['refresh_token'] 
+        # temp store refresh token (spotify doesnt always send one)
+        r_token = self._token.get('refresh_token') if self._token else None
         async with aiohttp.ClientSession() as session:
             async with session.post(self._token_url, headers=self._token_headers, data=data) as resp:
                 if resp.status != 200:
                     raise Exception(f"Token request failed: {await resp.text()}")
                 self._token = await resp.json()
-                if "refresh_token" not in self._token:
-                    self._token['refresh_token'] = r_token 
+                if "refresh_token" not in self._token and r_token:
+                    self._token['refresh_token'] = r_token
                 self._token["expires_time"] = time.time()+int(self._token['expires_in'])
                 await self.storage.save_token(self._token, name="spotify")
                 return self._token
@@ -131,10 +149,14 @@ class TokenHandler:
     async def _refresh_token(self):
         """ Refresh oauth token, get new token if refresh fails """
         logger.warning(f"Refreshing token...")
+        refresh_token = self._token.get('refresh_token') if self._token else None
+        if not refresh_token:
+            # No refresh token (e.g. client-credentials only): re-authorize instead
+            return await self._get_new_token()
         try:
             return await self._token_request({
                 "grant_type": "refresh_token",
-                "refresh_token": self._token['refresh_token']
+                "refresh_token": refresh_token
             })
         except Exception as e:
             logger.error(f"Refreshing token failed! {e}")
