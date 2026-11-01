@@ -1,194 +1,17 @@
 import logging
-import re
 import aiohttp
 import asyncio
+from .deprecations import FAILURE_HINTS, deprecation_note
 from .errors import SpotifyError
 from .oauth import TokenHandler
+from .scopes import REQUIRED_SCOPES
 
 logger = logging.getLogger(__name__)
 
 base_url = "https://api.spotify.com/v1"
 
-# Endpoints Spotify has removed or deprecated. spotifio raises instead of
-# calling them so callers get a clear message instead of a bare 403/404.
-# Verified against this app on 2026-10-31; see Spotify changelogs Feb-Jul 2026.
-_FAILURE_HINTS = {
-    400: "bad request",
-    401: "invalid or expired token",
-    403: "forbidden - endpoint deprecated, or this app is not allowed to call it",
-    404: "resource not found, or the endpoint has been removed",
-    410: "gone - Spotify answers this for a malformed request path (a base URL built "
-         "without a separating slash does this), or the endpoint is gone",
-    429: "rate limited",
-}
-
-# Endpoints the Spotify Web API reference marks deprecated, and what the docs
-# say to use instead. Source: developer.spotify.com/documentation/web-api/reference
-# (the "deprecated" flag on each endpoint) and the Web API changelog.
-# Matched with fullmatch against the concrete path spotifio requests, so
-# 'me/tracks' (still documented as valid) is never confused with the deprecated
-# save/remove variants of the same path.
-_DEPRECATED_PATTERNS = [
-    ('GET', r'audio-features(/.*)?', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'audio-analysis/[^/]+', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'artists/[^/]+/related-artists', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'artists/[^/]+/top-tracks', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'browse/featured-playlists', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'browse/categories(/.*)?', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'browse/new-releases', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'recommendations(/.*)?', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'markets', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'users/[^/]+', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'users/[^/]+/playlists', "deprecated by Spotify, use GET /me/playlists"),
-    ('POST', r'users/[^/]+/playlists', "deprecated by Spotify, use POST /me/playlists"),
-    ('GET', r'(albums|artists|audiobooks|chapters|episodes|shows|tracks)',
-     "deprecated by Spotify as a batch lookup, request the items one by one"),
-    ('PUT', r'me/(albums|audiobooks|episodes|shows|tracks)',
-     "deprecated by Spotify, use PUT /me/library (Save Items to User's Library)"),
-    ('DELETE', r'me/(albums|audiobooks|episodes|shows|tracks)',
-     "deprecated by Spotify, use DELETE /me/library (Remove Items from User's Library)"),
-    ('GET', r'me/(albums|audiobooks|episodes|shows|tracks)/contains',
-     "deprecated by Spotify, use GET /me/library/contains"),
-    ('PUT', r'me/following', "deprecated by Spotify, no replacement documented"),
-    ('DELETE', r'me/following', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'me/following/contains', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'playlists/[^/]+/tracks',
-     "deprecated by Spotify, use GET /playlists/{playlist_id}/items (Get Playlist Items)"),
-    ('POST', r'playlists/[^/]+/tracks',
-     "deprecated by Spotify, use POST /playlists/{playlist_id}/items (Add Items to Playlist)"),
-    ('DELETE', r'playlists/[^/]+/tracks',
-     "deprecated by Spotify, use DELETE /playlists/{playlist_id}/items (Remove Playlist Items)"),
-    ('PUT', r'playlists/[^/]+/tracks',
-     "deprecated by Spotify, use PUT /playlists/{playlist_id}/items (Update Playlist Items)"),
-    ('PUT', r'playlists/[^/]+/followers', "deprecated by Spotify, no replacement documented"),
-    ('DELETE', r'playlists/[^/]+/followers', "deprecated by Spotify, no replacement documented"),
-    ('GET', r'playlists/[^/]+/followers/contains',
-     "deprecated by Spotify, no replacement documented"),
-]
-
-
-def _deprecation_note(method, endpoint):
-    """Docs note for a deprecated endpoint, or None if the docs do not mark it
-    deprecated."""
-    path = endpoint.lstrip('/')
-    for req_method, pattern, note in _DEPRECATED_PATTERNS:
-        if req_method == method and re.fullmatch(pattern, path):
-            return note
-    return None
-
 class RequestHandler:
-    SCOPE_REQUIREMENTS = {
-        ### PLAYER -----------------------------------------
-        'get_playback_state': ['user-read-playback-state'],
-        'transfer_playback': ['user-modify-playback-state'],
-        'get_available_devices': ['user-read-playback-state'],
-        'get_currently_playing': ['user-read-currently-playing'],
-        'start_playback': ['user-modify-playback-state'],
-        'pause_playback': ['user-modify-playback-state'],
-        'skip_to_next': ['user-modify-playback-state'],
-        'skip_to_previous': ['user-modify-playback-state'],
-        'seek_to_position': ['user-modify-playback-state'],
-        'set_repeat_mode': ['user-modify-playback-state'],
-        'set_playback_volume': ['user-modify-playback-state'],
-        'set_shuffle': ['user-modify-playback-state'],
-        'get_recently_played': ['user-read-recently-played'],
-        'add_to_queue': ['user-modify-playback-state'],
-        'get_queue': ['user-read-playback-state'],
-        ### USERS ------------------------------------------
-        'get_current_user': ['user-read-private', 'user-read-email'],
-        'get_user_profile': [],
-        'get_followed_artists': ['user-follow-read'],
-        'follow_artists': ['user-follow-modify'],
-        'follow_users': ['user-follow-modify'],
-        'unfollow_artists': ['user-follow-modify'],
-        'unfollow_users': ['user-follow-modify'],
-        'check_following_artists': ['user-follow-read'],
-        'check_following_users': ['user-follow-read'],
-        'follow_playlist': ['playlist-modify-public', 'playlist-modify-private'],
-        'unfollow_playlist': ['playlist-modify-public', 'playlist-modify-private'],
-        'get_user_top_items': ['user-top-read'],
-        ### PLAYLISTS -------------------------------------
-        'get_playlist': [],
-        'change_playlist_details': ['playlist-modify-public', 'playlist-modify-private'],
-        'get_playlist_tracks': [],
-        'add_playlist_tracks': ['playlist-modify-public', 'playlist-modify-private'],
-        'update_playlist_tracks': ['playlist-modify-public', 'playlist-modify-private'],
-        'remove_playlist_tracks': ['playlist-modify-public', 'playlist-modify-private'],
-        'get_current_user_playlists': ['playlist-read-private'],
-        'get_user_playlists': [],
-        'create_playlist': ['playlist-modify-public', 'playlist-modify-private'],
-        'get_featured_playlists': [],
-        'get_category_playlists': [],
-        ### SEARCH ---------------------------------------
-        'search': [],
-        ### TRACKS --------------------------------------
-        'get_track': [],
-        'get_several_tracks': [],
-        'get_user_saved_tracks': ['user-library-read'],
-        'save_tracks': ['user-library-modify'],
-        'remove_saved_tracks': ['user-library-modify'],
-        'check_saved_tracks': ['user-library-read'],
-        ### LIBRARY ITEMS (replaces the per-type save/remove/contains endpoints) ---
-        'save_library_items': ['user-library-modify'],
-        'remove_library_items': ['user-library-modify'],
-        'check_saved_items': ['user-library-read'],
-        ### PLAYLIST ITEMS (replaces the per-playlist tracks endpoints) -----------
-        'get_playlist_items': ['playlist-read-private'],
-        'add_playlist_items': ['playlist-modify-public'],
-        'remove_playlist_items': ['playlist-modify-public'],
-        'update_playlist_items': ['playlist-modify-public'],
-        'get_track_audio_features': [],
-        'get_several_audio_features': [],
-        'get_track_audio_analysis': [],
-        ### ALBUMS ----------------------------------------
-        'get_album': [],
-        'get_several_albums': [],
-        'get_album_tracks': [],
-        'get_user_saved_albums': ['user-library-read'],
-        'save_albums': ['user-library-modify'],
-        'remove_saved_albums': ['user-library-modify'],
-        'check_saved_albums': ['user-library-read'],
-        'get_new_releases': [],
-        ### ARTISTS --------------------------------------
-        'get_artist': [],
-        'get_several_artists': [],
-        'get_artist_albums': [],
-        'get_artist_top_tracks': [],
-        'get_artist_related_artists': [],
-        ### AUDIOBOOKS ----------------------------------
-        'get_audiobook': ['user-read-playback-position'],
-        'get_several_audiobooks': ['user-read-playback-position'],
-        'get_audiobook_chapters': ['user-read-playback-position'],
-        'get_user_saved_audiobooks': ['user-library-read'],
-        'save_audiobooks': ['user-library-modify'],
-        'remove_saved_audiobooks': ['user-library-modify'],
-        'check_saved_audiobooks': ['user-library-read'],
-        ### CATEGORIES ------------------------------------
-        'get_categories': [],
-        'get_category': [],
-        ### CHAPTERS ------------------------------------
-        'get_chapter': ['user-read-playback-position'],
-        'get_several_chapters': ['user-read-playback-position'],
-        ### EPISODES ------------------------------------
-        'get_episode': ['user-read-playback-position'],
-        'get_several_episodes': ['user-read-playback-position'],
-        'get_user_saved_episodes': ['user-library-read'],
-        'save_episodes': ['user-library-modify'],
-        'remove_saved_episodes': ['user-library-modify'],
-        'check_saved_episodes': ['user-library-read'],
-        ### GENRES ------------------------------------
-        'get_available_genre_seeds': [],
-        ### MARKETS -----------------------------------
-        'get_available_markets': [],
-        ### SHOWS ------------------------------------
-        'get_show': ['user-read-playback-position'],
-        'get_several_shows': ['user-read-playback-position'],
-        'get_show_episodes': ['user-read-playback-position'],
-        'get_user_saved_shows': ['user-library-read'],
-        'save_shows': ['user-library-modify'],
-        'remove_saved_shows': ['user-library-modify'],
-        'check_saved_shows': ['user-library-read']
-    }
+    SCOPE_REQUIREMENTS = REQUIRED_SCOPES
 
     def __init__(self, token_handler=None, *args, **kwargs):
         self.token_handler = token_handler or TokenHandler(*args, **kwargs)
@@ -259,10 +82,10 @@ class RequestHandler:
                             pass
                         # Spotify now answers some failures with a bare status, e.g. {"error":{"status":403}}
                         if not reason:
-                            reason = _FAILURE_HINTS.get(resp.status, "no message returned by Spotify")
+                            reason = FAILURE_HINTS.get(resp.status, "no message returned by Spotify")
                         # If the docs mark this endpoint deprecated, say so and name
                         # the endpoint the docs point at instead of guessing.
-                        note = _deprecation_note(method, endpoint)
+                        note = deprecation_note(method, endpoint)
                         if note and resp.status in (403, 404, 410):
                             reason = f"{reason} [{method} {endpoint} is {note}]"
                         raise SpotifyError(resp.status, reason, error_text)
