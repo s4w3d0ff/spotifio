@@ -114,3 +114,12 @@ async def test_async_with_closes_the_session(api):
         session = client._session
         await client._request("GET", "tracks/def")
     assert session.closed
+
+
+async def test_a_failure_body_that_is_not_an_error_object_still_raises_cleanly(api):
+    api["script"] = [(502, b"null", {"Content-Type": "application/json"})]
+    client = api["new_handler"]()
+    with pytest.raises(SpotifyError) as exc:
+        await client._request("GET", "tracks/abc")
+    assert exc.value.status == 502
+    await client.close()

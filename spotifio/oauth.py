@@ -192,30 +192,35 @@ class TokenHandler:
         self._running = True
         self._refresh_event.set()
         logger.debug(f"_token_refresher started...")
-        while self._running:
-            if not self._token or 'expires_time' not in self._token:
-                logger.error("_token_refresher has no token with an expires_time; "
-                             "call login() first")
-                break
-            time_left = self._token['expires_time'] - time.time()-60
-            logger.debug(f"Token expires in {time_left} seconds...")
-            if time_left <= 0:
-                # pause 'self.get_token'
-                self._refresh_event.clear()
-                try:
-                    # refresh token
-                    await self._refresh_token()
-                except Exception as e:
-                    # Let callers continue with the token in hand: Spotify answers the
-                    # request with its own error instead of this task hanging.
-                    logger.error(f"Refreshing token failed: {e}. Call login(reauth=True) "
-                                 "to authorize again.")
-                    self._refresh_event.set()
+        try:
+            while self._running:
+                if not self._token or 'expires_time' not in self._token:
+                    logger.error("_token_refresher has no token with an expires_time; "
+                                 "call login() first")
                     break
-                # resume 'self.get_token'
-                self._refresh_event.set()
-                continue # skip sleep to get new time_left
-            await asyncio.sleep(time_left)
+                time_left = self._token['expires_time'] - time.time()-60
+                logger.debug(f"Token expires in {time_left} seconds...")
+                if time_left <= 0:
+                    # pause 'self.get_token'
+                    self._refresh_event.clear()
+                    try:
+                        # refresh token
+                        await self._refresh_token()
+                    except Exception as e:
+                        # Let callers continue with the token in hand: Spotify answers the
+                        # request with its own error instead of this task hanging.
+                        logger.error(f"Refreshing token failed: {e}. Call login(reauth=True) "
+                                     "to authorize again.")
+                        self._refresh_event.set()
+                        break
+                    # resume 'self.get_token'
+                    self._refresh_event.set()
+                    continue # skip sleep to get new time_left
+                await asyncio.sleep(time_left)
+        finally:
+            # A finished loop has to be visible to _login, or a later login() would
+            # assume a refresher is still running when it is not.
+            self._running = False
 
     async def _run(self):
         self._refresh_task = asyncio.create_task(self._token_refresher())
@@ -243,13 +248,17 @@ class TokenHandler:
             self.granted_scopes = set((self._token.get('scope') or "").split())
         else:
             self._token = await self._get_new_token()
-        if not self._running:
+        if self._refresh_task is None or self._refresh_task.done():
             await self._run()
 
     async def get_token(self):
         """ Returns current token after checking if the token needs to be refreshed """
         if not self._token:
             await self._login()
+        if self._refresh_task is None or self._refresh_task.done():
+            # Nothing is refreshing this token, so waiting for a refresh would wait
+            # forever. Hand back what is in hand and let Spotify answer.
+            return self._token
         # wait for refresh if needed
         await self._refresh_event.wait()
         return self._token

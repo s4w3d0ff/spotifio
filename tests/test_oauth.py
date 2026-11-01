@@ -151,3 +151,30 @@ async def test_get_token_returns_the_old_token_when_refreshing_fails(monkeypatch
     token = await asyncio.wait_for(handler.get_token(), timeout=5)
     assert token["access_token"] == "old"
     await handler.stop()
+
+
+async def already(token):
+    return token
+
+
+async def test_get_token_does_not_wait_for_a_refresher_that_is_gone(monkeypatch, free_port):
+    handler = make_handler(monkeypatch, free_port)
+    handler._token = {"access_token": "a", "expires_time": time.time() + 100}
+    await handler._run()
+    await handler.stop()
+    token = await asyncio.wait_for(handler.get_token(), timeout=2)
+    assert token["access_token"] == "a"
+
+
+async def test_a_refresher_that_already_ended_is_replaced_by_the_next_login(monkeypatch, free_port):
+    # A token with no expires_time ends the refresher at once: the next login has
+    # to start a fresh one instead of assuming the old task is still running.
+    handler = make_handler(monkeypatch, free_port)
+    expired = {"access_token": "a"}
+    handler.storage.load_token = lambda name="": already(expired)
+    await handler._login()
+    first = handler._refresh_task
+    await asyncio.wait_for(first, timeout=2)
+    await handler._login()
+    assert handler._refresh_task is not first
+    await handler.stop()

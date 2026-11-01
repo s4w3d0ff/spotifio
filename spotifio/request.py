@@ -117,14 +117,19 @@ class RequestHandler:
         except aiohttp.ClientError as e:
             logger.error(f"Request failed: {str(e)}")
             raise
+
     async def _error(self, method, endpoint, resp):
         """ Build the SpotifyError for a failed response. """
         error_text = await resp.text()
         reason = None
         try:
-            reason = json.loads(error_text).get('error', {}).get('message')
+            payload = json.loads(error_text)
         except ValueError:
-            pass
+            payload = None
+        if isinstance(payload, dict):
+            error = payload.get('error')
+            if isinstance(error, dict):
+                reason = error.get('message')
         # Spotify now answers some failures with a bare status, e.g. {"error":{"status":403}}
         if not reason:
             reason = FAILURE_HINTS.get(resp.status, "no message returned by Spotify")
