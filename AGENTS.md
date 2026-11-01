@@ -28,6 +28,14 @@
   or PR body. New config values go in `.env`, never hardcoded in the library.
 - **Test only read-only endpoints.** No library, playlist, follow, or playback
   mutations against the maintainer's personal account.
+- **Docs first, never probe in the dark.** Resolve every endpoint question from
+  the official docs — https://developer.spotify.com/documentation/web-api — the
+  endpoint reference and the changelog
+  (`/documentation/web-api/changelog`) — and read those pages before changing
+  code. Running a script that hits dozens of endpoints to see which answer 404
+  is forbidden: it looks like scraping or API enumeration from the maintainer's
+  own IP and risks rate limits or a ban. A request is allowed only when it is
+  read-only, needed for one specific claim being tested, and few in number.
 - **Repo contains the library only.** No diagnostic scripts, OAuth probes, or
   helper tooling in the repo — the maintainer does not want it. Any debugging
   script lives outside the repo (e.g. `/tmp/spotifio-scratch/`).
