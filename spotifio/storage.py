@@ -39,6 +39,8 @@ class JSONStorage(TokenStorage):
     async def _save(self, data, filename):
         async with aiofiles.open(filename, 'w') as file:
             await file.write(json.dumps(data, indent=4))
+        # access/refresh tokens are secrets: keep the file owner-only
+        os.chmod(filename, 0o600)
 
     async def save_token(self, token, name=''):
         """ Saves OAuth token to database"""

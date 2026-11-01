@@ -60,7 +60,7 @@ class TokenHandler:
         self.redirect_uri = redirect_uri or os.environ.get("SPOTIFIO_REDIRECT_URI")
         if not self.redirect_uri:
             raise ValueError(
-                "redirect_uri is required: pass it to TokenHandler()/Spotify() or set "
+                "redirect_uri is required: pass it to RequestHandler()/Client() or set "
                 "SPOTIFIO_REDIRECT_URI. It must be identical to a Redirect URI registered "
                 "for your app at https://developer.spotify.com/dashboard (Spotify rejects "
                 "'localhost'; use the loopback IP literal, e.g. http://127.0.0.1:PORT/callback)."
