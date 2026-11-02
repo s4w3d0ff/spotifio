@@ -85,7 +85,9 @@ answer.
   not exist.
 - Waiting for the authorization code is bounded by
   `TokenHandler.AUTH_CODE_TIMEOUT_SECONDS` (300) and the callback port is
-  released whichever way the wait ends.
+  released whichever way the wait ends. The timeout class `asyncio.wait_for`
+  raises is caught on Python 3.10 as well, where it is not the builtin
+  `TimeoutError`.
 - The package is split: `spotifio/request.py` (HTTP and scopes),
   `spotifio/errors.py`, `spotifio/scopes.py`, `spotifio/deprecations.py` and one
   module per endpoint group. `Client` keeps every method it had.
