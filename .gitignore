@@ -1,3 +1,12 @@
+# --- secrets: never commit (client id/secret, tokens) ---
+.env
+.env.local
+*.env
+
+# spotifio JSONStorage default token dir
+db/
+*_token.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

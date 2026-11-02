@@ -3,9 +3,16 @@ from setuptools import setup, find_packages
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
+# requirements.txt is the single place a floor is written
+with open("requirements.txt", "r", encoding="utf-8") as fh:
+    install_requires = [
+        line.strip() for line in fh
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
 setup(
     name="spotifio",
-    version="0.1.7",
+    version="0.2.0",
     author="s4w3d0ff",
     author_email="",
     description="An async Spotify Web API client library",
@@ -19,18 +26,17 @@ setup(
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Framework :: AsyncIO",
     ],
-    python_requires=">=3.7",
-    install_requires=[
-        "aiohttp>=3.8.0",
-        "aiofiles>=0.8.0",
-    ],
+    # aiohttp 3.14.4 needs 3.10+
+    python_requires=">=3.10",
+    install_requires=install_requires,
     keywords="spotify api async aiohttp music streaming oauth2",
     project_urls={
         "Bug Reports": "https://github.com/s4w3d0ff/spotifio/issues",

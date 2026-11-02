@@ -1,2 +1,4 @@
-aiohttp>=3.8.0
-aiofiles>=0.8.0
+# Single dependency list. setup.py reads this file.
+# The aiohttp floor is a security floor: 3.14.3 and older are vulnerable.
+aiohttp>=3.14.4
+aiofiles>=24.1.0

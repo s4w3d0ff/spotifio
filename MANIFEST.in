@@ -1,0 +1,11 @@
+# The sdist is the library and the files setup.py needs. Maintainer notes and any
+# real .env stay out of it.
+include requirements.txt
+include .env.example
+global-exclude AGENTS.md
+global-exclude .env
+global-exclude .env.local
+prune .agents
+global-exclude *.pyc
+global-exclude *.pyo
+prune __pycache__
