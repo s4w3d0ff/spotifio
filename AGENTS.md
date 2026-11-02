@@ -20,10 +20,15 @@
   hardcoded.
 - **Docs first.** Resolve endpoint questions from
   https://developer.spotify.com/documentation/web-api before changing code. No
-  scripts that sweep dozens of endpoints from the maintainer's IP. A request is
+  ad-hoc scripts that sweep endpoints from the maintainer's IP. A request is
   allowed only when it is read-only, needed for one claim, and few in number.
 - **Read-only endpoints only.** No library, playlist, follow, or playback mutation
-  against the maintainer's account.
+  against the maintainer's account. The one exception to the request-count rule is
+  `python -m pytest -m live`: the opt-in sweep of GET-only endpoints, paced, and
+  skipped unless `SPOTIFIO_LIVE=1`.
+- **Never get rate limited.** Talk to Spotify at no more than one request per
+  second. `tests/test_live_api.py` spaces calls by `GAP_SECONDS` and fails the run
+  if a 429 appears.
 - **Library only in the repo.** No diagnostic scripts or probes. Debugging lives in
   `/tmp/spotifio-scratch/`.
 - **Repo text stays minimal.** Docstrings, comments, README and config samples carry
