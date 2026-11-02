@@ -133,7 +133,9 @@ class TokenHandler:
         # wait for auth code, then always release the callback port
         try:
             await asyncio.wait_for(self._auth_future, timeout=self.AUTH_CODE_TIMEOUT_SECONDS)
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
+            # Python 3.10 keeps asyncio.TimeoutError separate from the builtin one,
+            # so both names have to be caught for the wait to be bounded everywhere.
             raise TimeoutError(
                 f"No authorization code arrived at {self.redirect_uri} within "
                 f"{self.AUTH_CODE_TIMEOUT_SECONDS} seconds. Authorize the link above "
