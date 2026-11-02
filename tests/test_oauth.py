@@ -7,6 +7,20 @@ import pytest
 from spotifio import oauth
 from spotifio.errors import SpotifyError
 from spotifio.oauth import TokenHandler
+from spotifio.request import RequestHandler
+
+
+class NameFirstStorage:
+    """Token methods declared (name, token), the order poolguy.core.storage.SQLiteStorage uses."""
+
+    def __init__(self):
+        self.tokens = {}
+
+    async def save_token(self, name, token):
+        self.tokens[name] = token
+
+    async def load_token(self, name):
+        return self.tokens.get(name)
 
 
 class FakeStorage:
@@ -20,12 +34,16 @@ class FakeStorage:
         return None
 
 
-def make_handler(monkeypatch, port):
+def set_env(monkeypatch, port):
     monkeypatch.setenv("SPOTIFIO_CLIENT_ID", "client-id")
     monkeypatch.setenv("SPOTIFIO_CLIENT_SECRET", "client-secret")
     monkeypatch.setenv("SPOTIFIO_REDIRECT_URI", f"http://127.0.0.1:{port}/cb")
     monkeypatch.delenv("SPOTIFIO_SCOPES", raising=False)
-    return TokenHandler(storage=FakeStorage())
+
+
+def make_handler(monkeypatch, port, storage=None):
+    set_env(monkeypatch, port)
+    return TokenHandler(storage=storage if storage is not None else FakeStorage())
 
 
 def no_browser(monkeypatch):
@@ -202,3 +220,40 @@ async def test_login_returns_with_the_saved_token_when_the_refresh_fails(monkeyp
     assert handler._token["access_token"] == "stale"
     assert handler._token is not None
     await handler.stop()
+
+
+async def test_a_storage_declaring_name_first_is_used_unchanged(monkeypatch, local_server, free_port):
+    """TokenHandler calls the storage with keywords only, so either argument order works."""
+    handler = make_handler(monkeypatch, free_port, storage=NameFirstStorage())
+    handler._token_url = f"{local_server['base_url']}/api/token"
+    local_server["script"] = [(200, {"access_token": "a", "refresh_token": "r",
+                                     "expires_in": 3600, "scope": "user-library-read"}, {})]
+    token = await handler._token_request({"grant_type": "authorization_code",
+                                          "code": "c", "redirect_uri": handler.redirect_uri})
+    assert handler.storage.tokens["spotify"] == token
+    handler._token = None
+    await asyncio.wait_for(handler._login(), timeout=5)
+    assert handler._token == token
+    assert len(local_server["calls"]) == 1
+    await handler.stop()
+
+
+async def test_assigning_a_shared_storage_before_login_uses_it(monkeypatch, free_port):
+    """A consumer that hands the handler another storage (e.g. poolguy's) logs in through it."""
+    handler = make_handler(monkeypatch, free_port)
+    shared = NameFirstStorage()
+    shared.tokens["spotify"] = {"access_token": "shared", "expires_time": time.time() + 100,
+                                "scope": "user-library-read"}
+    handler.storage = shared
+    await asyncio.wait_for(handler._login(), timeout=5)
+    assert handler._token["access_token"] == "shared"
+    await handler.stop()
+
+
+async def test_storage_passed_at_construction_reaches_the_token_handler(monkeypatch, free_port):
+    """Client(storage=...) / RequestHandler(storage=...) hands the same object to TokenHandler."""
+    set_env(monkeypatch, free_port)
+    shared = NameFirstStorage()
+    rh = RequestHandler(storage=shared)
+    assert rh.token_handler.storage is shared
+    await rh.token_handler.stop()

@@ -13,6 +13,8 @@ from .storage import JSONStorage
 
 logger = logging.getLogger(__name__)
 
+TOKEN_NAME = "spotify"
+
 closeBrowser = """
 <!DOCTYPE html>
 <html lang="en">
@@ -157,7 +159,7 @@ class TokenHandler:
                 self._token["expires_time"] = time.time()+int(self._token['expires_in'])
                 # scope comes from the token response, not the request
                 self.granted_scopes = set((self._token.get('scope') or "").split())
-                await self.storage.save_token(self._token, name="spotify")
+                await self.storage.save_token(token=self._token, name=TOKEN_NAME)
                 return self._token
 
     async def _refresh_token(self):
@@ -236,7 +238,7 @@ class TokenHandler:
     async def _login(self, token=None, reauth=False):
         """Use the saved token or authorize. reauth=True ignores the saved token."""
         logger.debug(f"Attempting to load saved token...")
-        self._token = None if reauth else await self.storage.load_token(name="spotify")
+        self._token = None if reauth else await self.storage.load_token(name=TOKEN_NAME)
         if self._token:
             logger.warning(f"Loaded saved token from storage!")
             self.granted_scopes = set((self._token.get('scope') or "").split())
