@@ -9,6 +9,10 @@ def test_failure_hints_cover_the_statuses_spotifio_special_cases():
     assert set(FAILURE_HINTS) == {400, 401, 403, 404, 410, 429}
 
 
+def test_a_hint_names_the_answer_a_batch_endpoint_gives_without_ids():
+    assert "Missing required field: ids" in FAILURE_HINTS[400]
+
+
 def test_deprecated_write_endpoint_names_the_documented_replacement():
     note = deprecation_note("PUT", "me/tracks")
     assert note is not None

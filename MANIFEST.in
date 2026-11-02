@@ -2,7 +2,6 @@
 # real .env stay out of it.
 include requirements.txt
 include .env.example
-include CHANGELOG.md
 global-exclude AGENTS.md
 global-exclude .env
 global-exclude .env.local

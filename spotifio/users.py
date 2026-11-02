@@ -5,6 +5,9 @@ class UserMethods(RequestHandler):
     """User profile and follow endpoints."""
 
     async def get_current_user(self):
+        """GET /me: needs a user token. An app-only token gets 401 'Only user access
+        tokens can be used with this endpoint'. The 'account_id' field (added in the
+        May 2026 changelog) is the stable public identifier for your own account."""
         await self._check_scope('get_current_user')
         return await self._request('GET', 'me')
 

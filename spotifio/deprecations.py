@@ -12,6 +12,11 @@
 # spotifio still calls every endpoint it has a method for: availability is
 # Spotify's answer, not a local guess. When Spotify answers 403, 404 or 410 the
 # SpotifyError message names the replacement the docs point at.
+# Some response fields are marked deprecated even where the endpoint stays:
+# track.linked_from, track.isPlayable, album.album_group, artist.followers,
+# artist.genres, artist.popularity, album.available_markets,
+# track.available_markets. An app in extended quota mode still receives
+# available_markets, external_ids, popularity, album.label and artist.followers.
 # Source: developer.spotify.com/documentation/web-api/reference,
 #         .../documentation/web-api/references/changes/february-2026,
 #         .../documentation/web-api/tutorials/february-2026-migration-guide
@@ -21,7 +26,8 @@ REMOVED = "removed by Spotify for Development Mode apps"
 UNLISTED = "not in the Spotify docs list of endpoints that remain available"
 
 FAILURE_HINTS = {
-    400: "bad request",
+    400: "bad request - a batch endpoint with no ids answers 'Missing required "
+         "field: ids'",
     401: "invalid or expired token",
     403: "forbidden - endpoint deprecated or removed for this app's quota mode, or "
          "the current user is not allowed on this resource",

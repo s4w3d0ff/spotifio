@@ -158,6 +158,9 @@ class TokenHandler:
                 if "refresh_token" not in self._token and r_token:
                     self._token['refresh_token'] = r_token
                 self._token["expires_time"] = time.time()+int(self._token['expires_in'])
+                # The scope list is read from the token response: a refresh can report
+                # more scopes than the request asked for, so the local scope check
+                # follows the token rather than the request.
                 self.granted_scopes = set((self._token.get('scope') or "").split())
                 await self.storage.save_token(self._token, name="spotify")
                 return self._token

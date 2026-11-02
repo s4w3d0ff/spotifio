@@ -18,8 +18,9 @@
   an argument is absent); `load_dotenv()` is opt-in so importing spotifio never
   reads a file behind the caller's back; `SpotifyError` subclasses `Exception`
   and keeps the old message wording (`Request failed with status N: ...`). Any
-  unavoidable breaking change is listed under "Breaking changes" in README and
-  in the PR body. Never invent a class name in an error message — `Spotify()`
+  unavoidable breaking change is listed under "Breaking changes" in README, in
+  brief, and in full in the PR body. README stays under 700 characters, so the
+  detail lives in method docstrings. Never invent a class name in an error message — `Spotify()`
   does not exist; it is `Client` / `RequestHandler` / `TokenHandler`.
 - **Never commit credentials or account-specific config.** `SPOTIFIO_CLIENT_ID`,
   `SPOTIFIO_CLIENT_SECRET` and `SPOTIFIO_REDIRECT_URI` live in `.env`
