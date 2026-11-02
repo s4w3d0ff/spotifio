@@ -1,30 +1,17 @@
 # spotifio
 Async Spotify Api Wrapper
 
-```
-pip install spotifio
-```
-Needs Python 3.10 or newer and `aiohttp>=3.14.4`: 3.14.3 and older are vulnerable to CVE-2026-111064 in the local OAuth callback server and CVE-2026-69244 in every API request.
+`pip install spotifio` - Python 3.10+, `aiohttp>=3.14.4` (older aiohttp is vulnerable).
 
 ```python
 import asyncio, spotifio
 async def main():
-    async with spotifio.Client(client_id="client_id_123", client_secret="client_secret_123",
-                               redirect_uri="http://127.0.0.1:5050/spotify_oauth",
-                               scope=["user-read-currently-playing"]) as c:
-        print(await c.get_currently_playing())
+    async with spotifio.Client() as c:  # SPOTIFIO_CLIENT_ID, _CLIENT_SECRET, _REDIRECT_URI, _SCOPES
+        print(await c.get_current_user())
 asyncio.run(main())
 ```
 
-## Configuration
-- Nothing is defaulted. `client_id`, `client_secret` and `redirect_uri` (`SPOTIFIO_CLIENT_ID`, `SPOTIFIO_CLIENT_SECRET`, `SPOTIFIO_REDIRECT_URI`) must come from an argument or the environment, and a missing one raises `ValueError` when the client is created. `scope` may be empty (`SPOTIFIO_SCOPES`, space or comma separated); a method that needs one raises `spotifio.ScopeError`, and either of two accepted scopes is enough.
-- `redirect_uri` needs an explicit port and must match a Redirect URI in your app dashboard exactly, or authorization fails with `redirect_uri: Not matching configuration`. Spotify no longer accepts `localhost`: use `http://127.0.0.1:PORT/callback`, `http://[::1]:PORT/callback`, or HTTPS.
-- `spotifio.load_dotenv()` is opt-in and fills `os.environ` from `./.env` without replacing a variable that is already set. Copy `.env.example`, keep one variable per line and keep the final newline: without it the last two variables glue onto one line, and `load_dotenv()` rejects such a line with `path:lineno` instead of storing a broken secret.
-## Endpoints
-- The docs state three things and a `SpotifyError` message keeps them apart. **Deprecated**: `GET`/`POST`/`PUT`/`DELETE /playlists/{id}/tracks`, use the matching `/items`. **Removed for Development Mode apps** (February 2026 changelog): `PUT`/`DELETE /me/tracks` and the other per-type library writes plus their `/contains` forms, `PUT`/`DELETE /me/following`, `GET /me/following/contains`, `PUT`/`DELETE /playlists/{id}/followers` and its `/contains` form, all of which become `PUT`/`DELETE /me/library` or `GET /me/library/contains` with `spotify:track:`, `spotify:user:` or `spotify:playlist:` URIs; batch `GET /tracks`, `/albums`, `/artists`, `/episodes`, `/shows`, `/chapters`, `/audiobooks`, `/audio-features`, which become `GET /tracks/{id}` and friends; `GET /users/{id}` and `GET /users/{id}/playlists`, which have no replacement (`GET /me` and `GET /me/playlists` cover your own); `GET /browse/categories`, `GET /browse/categories/{id}`, `GET /browse/new-releases`, `GET /artists/{id}/top-tracks`, `GET /markets`, nothing documented. **Not listed as available**: `GET /browse/featured-playlists`, `GET /browse/categories/{id}/playlists`, `GET /recommendations`, `GET /recommendations/available-genre-seeds`, `GET /audio-features/{id}`, `GET /audio-analysis/{id}`, `GET /artists/{id}/related-artists`.
-- Apps in Extended Quota Mode need no migration: every endpoint, field and behaviour stays as it was. spotifio still calls every endpoint it has a method for, so availability is Spotify's answer, not a local guess. There is no `GET /me/library`, so reading a library stays per type with `get_user_saved_tracks`, `get_user_saved_albums`, `get_user_saved_shows`, `get_user_saved_episodes`, `get_user_saved_audiobooks`. `/me/library` takes up to 40 comma-separated Spotify URIs, not ids, and `get_playlist_items` answers 403 unless the current user owns the playlist or collaborates on it.
-- With this app's own credentials (2026-11-01): Spotify's editorial playlists (`37i9dQZF...`) return 404 and `search(type="playlist")` returns `null` items, `get_new_releases` answers 200 with an empty `playlists` array, batch endpoints answer 400 "Missing required field: ids" without `ids`, `GET /search` documents `limit` as 0-10 with a default of 5 while this app still answers `limit=20`, a malformed request path gets 410 from Spotify, `GET /me` with an app-only token gets 401, and `GET /users/{id}` is 200 for some accounts and 404 for others, so use `get_current_user()` and its `account_id` field (added May 2026) for a stable public identifier. The docs mark `track.linked_from`, `track.isPlayable`, `album.album_group`, `artist.followers`, `artist.genres`, `artist.popularity`, `album.available_markets` and `track.available_markets` deprecated in the response schemas, and this app still receives `available_markets`, `external_ids`, `popularity`, `album.label` and `artist.followers`.
-## Errors and tests
-- A failure raises `spotifio.SpotifyError` with `.status`, `.reason` and `.body`. A body with no message gets a cause hint, a machine readable reason such as `"reason":"QUOTA_EXCEEDED"` is appended to `.reason`, a 401 refreshes the token and a 429 waits `Retry-After`, both within `RequestHandler.MAX_ATTEMPTS` (6), and the status you get is the one Spotify actually sent. A success answer that is not JSON returns `bytes`. A failed token refresh raises `SpotifyError` naming `login(reauth=True)` instead of falling back to a browser flow that blocks a headless process, and `login()` refreshes a saved token that is already expired before it returns. Requests share one aiohttp session, closed by `await c.close()` or `async with`. `python -m pytest` needs no Spotify credentials and makes no request outside 127.0.0.1, and CI runs it on Python 3.10 through 3.14.
-## Breaking changes (0.1.x to 0.2.0)
-- `redirect_uri`, `client_id` and `client_secret` must be supplied: 0.1.7 defaulted the URI to `http://localhost:8888/callback`, which Spotify already rejected, and accepted missing credentials until an opaque `401`. Python and aiohttp floors. `SpotifyError` and `ScopeError` are exported from the package root and live in `spotifio/errors.py`, so `from spotifio.client import SpotifyError` no longer works. A failed refresh raises instead of opening a browser. `load_dotenv()` rejects a malformed line. Requests share one session. Scope checks follow the scopes the token was granted, so a call that used to be blocked locally now goes through: enforce a write policy yourself if you need one. Method names, positional argument order and response payloads are unchanged.
+Nothing is defaulted: a missing value raises `ValueError`.
+
+## Breaking changes
+Required credentials, redirect URI, floors: CHANGELOG.md.

@@ -91,6 +91,9 @@ answer.
 - The package is split: `spotifio/request.py` (HTTP and scopes),
   `spotifio/errors.py`, `spotifio/scopes.py`, `spotifio/deprecations.py` and one
   module per endpoint group. `Client` keeps every method it had.
+- README is a short pointer: install, the floors, one example, and where each
+  detail lives. Endpoint availability, error behaviour and the full breaking
+  list live here and in method docstrings.
 - `requirements.txt` is the only dependency list; `setup.py` reads it.
 
 ### Added
@@ -122,6 +125,24 @@ and CVE-2026-69244 / GHSA-cq5v-8q36-5273 (High, 7.1: an out-of-bounds read in th
 C HTTP parser used for every API request). Both are fixed in aiohttp 3.14.4; 3.14.3
 and older are vulnerable. `MANIFEST.in` keeps `AGENTS.md`, `.agents/` and any real
 `.env` out of the published sdist.
+
+### Observed with an app's own credentials (2026-11-01)
+
+- Spotify's own editorial playlists (`37i9dQZF...`) return 404, and
+  `search(type="playlist")` returns `null` items.
+- `get_new_releases` answers 200 with an empty `playlists` array.
+- Batch endpoints answer 400 "Missing required field: ids" when `ids` is absent.
+- `GET /search` documents `limit` as 0-10 with a default of 5, and this app still
+  answers `limit=20`.
+- A malformed request path gets 410 from Spotify rather than 404.
+- `GET /me` with an app-only token answers 401, and `GET /users/{id}` is 200 for
+  some accounts and 404 for others, so `get_current_user()` and its `account_id`
+  field (added May 2026) is the stable public identifier.
+- The response schemas mark `track.linked_from`, `track.isPlayable`,
+  `album.album_group`, `artist.followers`, `artist.genres`, `artist.popularity`,
+  `album.available_markets` and `track.available_markets` deprecated. This app
+  still receives `available_markets`, `external_ids`, `popularity`, `album.label`
+  and `artist.followers`.
 
 ### Unchanged
 
