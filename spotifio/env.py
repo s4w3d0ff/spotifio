@@ -15,15 +15,7 @@ _TRAILING_COMMENT = re.compile(r"\s+#")
 
 
 def load_dotenv(path=".env"):
-    """Load KEY=VALUE lines from a .env file into os.environ.
-
-    Variables already in the environment win. Blank lines and lines starting with
-    '#' are skipped, a leading 'export ' is allowed, and a comment after whitespace
-    is dropped from an unquoted value. A line that is not KEY=VALUE, an invalid
-    variable name, or a quote that is never closed raises ValueError naming
-    path:lineno. Returns the number of variables set. This is not called
-    automatically: importing spotifio never reads files behind your back.
-    """
+    """Load KEY=VALUE into os.environ. Existing vars win. Bad lines raise ValueError with path:lineno. Not automatic."""
     if not os.path.exists(path):
         return 0
     count = 0
@@ -47,8 +39,7 @@ def load_dotenv(path=".env"):
 
 
 def _clean_value(value, location):
-    """Take the value a shell would take: strip one pair of quotes, drop a
-    trailing comment, and keep everything else exactly as written."""
+    """Take the value a shell would take: one pair of quotes, no trailing comment."""
     if value[:1] in ("'", '"'):
         quote = value[0]
         end = value.find(quote, 1)
@@ -63,11 +54,7 @@ def _clean_value(value, location):
 
 
 def _reject_glued_variables(value, location):
-    """A value that contains another spotifio variable is a .env file whose lines
-    were joined: 'SPOTIFIO_CLIENT_SECRET=xyzSPOTIFIO_SCOPES=read' is one line, not
-    two, and every variable after the first is lost. Give the caller the choice
-    instead of storing a broken secret.
-    """
+    """A value holding another spotifio variable means the file's lines were joined. Reject instead of storing a broken secret."""
     if "SPOTIFIO_" in value:
         raise ValueError(
             f"{location}: the value contains another SPOTIFIO_ variable. Each variable "

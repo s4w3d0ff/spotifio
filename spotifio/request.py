@@ -27,7 +27,7 @@ class RequestHandler:
         return self._session
 
     async def close(self):
-        """Close the HTTP session shared by all requests of this client."""
+        """Close the shared HTTP session."""
         if self._session is not None and not self._session.closed:
             await self._session.close()
         self._session = None
@@ -42,8 +42,7 @@ class RequestHandler:
         requirements = self.SCOPE_REQUIREMENTS.get(method_name)
         if not requirements:
             return
-        # A requirement is a scope name, or a tuple of names where any one is
-        # enough, e.g. playlist writes accept the public or the private scope.
+        # a requirement is a scope name, or a tuple where any one works
         def granted(names):
             names = {names} if isinstance(names, str) else set(names)
             return bool(names & set(self.token_handler.scope))
@@ -70,19 +69,11 @@ class RequestHandler:
             )
 
     async def login(self, token=None, reauth=False):
-        """ Sets up the token. reauth=True ignores the saved token and authorizes
-        again, e.g. to get a token for a different set of scopes. """
+        """Set up the token. reauth=True ignores the saved token."""
         await self.token_handler._login(token, reauth=reauth)
 
     async def _request(self, method, endpoint, params=None, data=None, headers=None):
-        """ Base Request Method for Spotify API calls.
-
-        A 401 refreshes the token and a 429 waits for Retry-After, at most
-        MAX_ATTEMPTS requests in total. When the attempts run out the last
-        response is raised as a SpotifyError with its real status. A success
-        Spotify did not send as JSON is returned as bytes. Transport failures
-        raise aiohttp.ClientError.
-        """
+        """One API call. 401 refreshes, 429 waits Retry-After, MAX_ATTEMPTS at most. Last real status raised. Non-JSON success returns bytes."""
         url = f"{base_url}/{endpoint.lstrip('/')}"
         logger.debug(f"_request({method=}, {url=}, {params=}, {data=})")
         try:
@@ -130,17 +121,14 @@ class RequestHandler:
             error = payload.get('error')
             if isinstance(error, dict):
                 reason = error.get('message')
-                # Some failures carry a machine readable reason next to the message,
-                # e.g. a 429 body of {"error":{"status":429,"message":"Too many
-                # requests","reason":"QUOTA_EXCEEDED"}}.
+                # 429 bodies also carry a machine readable reason
                 detail = error.get('reason')
                 if detail:
                     reason = f"{reason} ({detail})" if reason else detail
-        # Spotify now answers some failures with a bare status, e.g. {"error":{"status":403}}
+        # some failures carry a bare status, e.g. {"error":{"status":403}}
         if not reason:
             reason = FAILURE_HINTS.get(resp.status, "no message returned by Spotify")
-        # If the docs mark this endpoint deprecated, say so and name
-        # the endpoint the docs point at instead of guessing.
+        # name the replacement the docs give
         note = deprecation_note(method, endpoint)
         if note and resp.status in (403, 404, 410):
             reason = f"{reason} [{method} {endpoint} is {note}]"

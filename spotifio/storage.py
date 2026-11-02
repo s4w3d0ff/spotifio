@@ -28,7 +28,7 @@ class JSONStorage(TokenStorage):
         created = not os.path.exists(self.storage_dir)
         os.makedirs(self.storage_dir, exist_ok=True)
         if created:
-            # A token is a secret, so the dir that holds it belongs to the owner.
+            # the token dir belongs to the owner
             os.chmod(self.storage_dir, 0o700)
             logger.warning(f"Created dir {self.storage_dir}")
 
@@ -37,10 +37,8 @@ class JSONStorage(TokenStorage):
             return json.loads(await file.read())
 
     async def _save(self, data, filename):
-        # A token must never sit in a file another user can read, not even for a
-        # moment: mkstemp creates a 0600 file in the same directory and the rename
-        # moves it into place atomically. A symlink at the target is replaced
-        # instead of followed.
+        # mkstemp is 0600 at birth, rename is atomic, a symlink at the target is
+        # replaced not followed
         directory = os.path.dirname(filename) or '.'
         descriptor, temp_path = tempfile.mkstemp(dir=directory, prefix='.token_')
         os.close(descriptor)

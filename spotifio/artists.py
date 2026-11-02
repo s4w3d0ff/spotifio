@@ -31,7 +31,6 @@ class ArtistMethods(RequestHandler):
         return await self._request('GET', f'artists/{artist_id}/top-tracks', params=params)
 
     async def get_artist_related_artists(self, artist_id):
-        """Deprecated in the Spotify docs; Spotify answers 404. No replacement is
-        documented."""
+        """GET /artists/{id}/related-artists. Not in the docs availability list. 404."""
         await self._check_scope('get_artist_related_artists')
         return await self._request('GET', f'artists/{artist_id}/related-artists')

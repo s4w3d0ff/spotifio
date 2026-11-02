@@ -91,7 +91,7 @@ async def test_failure_without_a_spotify_message_uses_the_hint(api):
     with pytest.raises(SpotifyError) as exc:
         await client._request("PUT", "me/tracks", params={"ids": "x"})
     assert exc.value.status == 403
-    assert "deprecated" in exc.value.reason
+    assert "removed for Development Mode apps" in exc.value.reason
     assert "PUT /me/library" in exc.value.reason
     await client.close()
 

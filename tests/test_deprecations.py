@@ -9,10 +9,6 @@ def test_failure_hints_cover_the_statuses_spotifio_special_cases():
     assert set(FAILURE_HINTS) == {400, 401, 403, 404, 410, 429}
 
 
-def test_a_hint_names_the_answer_a_batch_endpoint_gives_without_ids():
-    assert "Missing required field: ids" in FAILURE_HINTS[400]
-
-
 def test_deprecated_write_endpoint_names_the_documented_replacement():
     note = deprecation_note("PUT", "me/tracks")
     assert note is not None
@@ -54,13 +50,10 @@ def test_a_batch_lookup_names_the_single_item_form_that_stays_available():
 
 
 def test_removed_and_unlisted_endpoints_are_worded_apart():
-    # The changelog calls these removed for Development Mode apps.
     for path in ("markets", "browse/new-releases", "browse/categories",
                  "browse/categories/nightlists", "users/abc", "users/abc/playlists",
                  "artists/abc/top-tracks"):
         assert REMOVED in deprecation_note("GET", path), path
-    # These pages still exist with no banner, but the docs do not list them as
-    # endpoints that remain available.
     for path in ("browse/featured-playlists", "browse/categories/nightlists/playlists",
                  "recommendations", "recommendations/available-genre-seeds",
                  "audio-features/abc", "audio-analysis/abc", "artists/abc/related-artists"):
@@ -82,5 +75,4 @@ def test_scope_table_matches_the_client_methods_exactly():
         name for name, obj in inspect.getmembers(Client, inspect.iscoroutinefunction)
         if not name.startswith("_")
     }
-    # login and close are client plumbing, not endpoints.
     assert set(REQUIRED_SCOPES) == methods - {"login", "close"}

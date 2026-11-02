@@ -77,12 +77,10 @@ class TokenHandler:
             )
         self.host = parsed_uri.hostname
         self.port = parsed_uri.port
-        # scopes: an argument, or SPOTIFIO_SCOPES, or none. An empty list is not a
-        # guess - it means the caller asked for no scopes (enough for app-only calls).
+        # scopes: argument, SPOTIFIO_SCOPES, or none. Empty means no scopes.
         env_scope = (os.environ.get("SPOTIFIO_SCOPES") or "").replace(",", " ").split()
         self.scope = list(scope) if scope is not None else env_scope
-        # scopes Spotify actually granted for the current token (from the token
-        # response 'scope' field); empty until a token is obtained
+        # scopes Spotify granted for this token; empty until a token exists
         self.granted_scopes = set()
         self.storage = storage or JSONStorage(*args, **kwargs)
         self._state = os.urandom(14).hex()
@@ -134,8 +132,7 @@ class TokenHandler:
         try:
             await asyncio.wait_for(self._auth_future, timeout=self.AUTH_CODE_TIMEOUT_SECONDS)
         except (TimeoutError, asyncio.TimeoutError):
-            # Python 3.10 keeps asyncio.TimeoutError separate from the builtin one,
-            # so both names have to be caught for the wait to be bounded everywhere.
+            # 3.10 raises asyncio.TimeoutError, not the builtin
             raise TimeoutError(
                 f"No authorization code arrived at {self.redirect_uri} within "
                 f"{self.AUTH_CODE_TIMEOUT_SECONDS} seconds. Authorize the link above "
@@ -146,7 +143,7 @@ class TokenHandler:
         logger.warning(f"Got Oauth code!")
 
     async def _token_request(self, data):
-        """ Base token request method, used for new or refreshing tokens """
+        """POST the token endpoint."""
         # temp store refresh token (spotify doesnt always send one)
         r_token = self._token.get('refresh_token') if self._token else None
         async with aiohttp.ClientSession() as session:
@@ -158,21 +155,13 @@ class TokenHandler:
                 if "refresh_token" not in self._token and r_token:
                     self._token['refresh_token'] = r_token
                 self._token["expires_time"] = time.time()+int(self._token['expires_in'])
-                # The scope list is read from the token response: a refresh can report
-                # more scopes than the request asked for, so the local scope check
-                # follows the token rather than the request.
+                # scope comes from the token response, not the request
                 self.granted_scopes = set((self._token.get('scope') or "").split())
                 await self.storage.save_token(self._token, name="spotify")
                 return self._token
 
     async def _refresh_token(self):
-        """ Refresh the access token with the saved refresh token.
-
-        Raises SpotifyError when there is no refresh token or Spotify rejects it.
-        Re-authorizing needs a browser, which a headless process cannot provide, so
-        the caller has to call login(reauth=True) instead of this method blocking on
-        one.
-        """
+        """Refresh with the saved refresh token. Raises SpotifyError if none or refused. Re-auth needs a browser: login(reauth=True)."""
         logger.warning(f"Refreshing token...")
         refresh_token = self._token.get('refresh_token') if self._token else None
         if not refresh_token:
@@ -183,7 +172,7 @@ class TokenHandler:
         })
 
     async def _get_new_token(self):
-        """ Get a new oauth token using the oauth code, get code if we dont have one yet """
+        """Exchange the auth code for a token, requesting a code first if needed."""
         await self._get_auth_code()
         logger.warning(f"Getting new token...")
         return await self._token_request({
@@ -193,7 +182,7 @@ class TokenHandler:
         })
 
     async def _token_refresher(self):
-        """ Waits for the time to refresh the token and refreshes """
+        """Refresh the token before it expires."""
         self._running = True
         logger.debug(f"_token_refresher started...")
         try:
@@ -211,8 +200,7 @@ class TokenHandler:
                         # refresh token
                         await self._refresh_token()
                     except Exception as e:
-                        # Let callers continue with the token in hand: Spotify answers the
-                        # request with its own error instead of this task hanging.
+                        # let callers continue; Spotify answers with its own error
                         logger.error(f"Refreshing token failed: {e}. Call login(reauth=True) "
                                      "to authorize again.")
                         self._refresh_event.set()
@@ -220,24 +208,21 @@ class TokenHandler:
                     # resume 'self.get_token'
                     self._refresh_event.set()
                     continue # skip sleep to get new time_left
-                # Nothing is due yet, so the token in hand is usable.
+                # not due yet: the token in hand is usable
                 self._refresh_event.set()
                 await asyncio.sleep(time_left)
         finally:
-            # A finished loop has to be visible to _login, or a later login() would
-            # assume a refresher is still running when it is not. A caller already
-            # waiting on the event must not wait forever.
+            # a dead loop must be visible to _login and to any waiter
             self._running = False
             self._refresh_event.set()
 
     async def _run(self):
-        # The event means "the token in hand is usable", so it starts closed and
-        # the refresher opens it once it has checked the token.
+        # the event means "token usable": closed at first, opened by the refresher
         self._refresh_event.clear()
         self._refresh_task = asyncio.create_task(self._token_refresher())
 
     async def stop(self):
-        """ Stop the refresh task and the callback server. """
+        """Stop the refresh task and the callback server."""
         self._running = False
         if self._refresh_task is not None:
             self._refresh_task.cancel()
@@ -249,9 +234,7 @@ class TokenHandler:
         await self.server.stop()
 
     async def _login(self, token=None, reauth=False):
-        """ Checks storage for saved token, gets new token if one isnt found. Starts the token refresher task.
-        reauth=True ignores the saved token and runs the authorization again, e.g. to
-        get a token for a different set of scopes. """
+        """Use the saved token or authorize. reauth=True ignores the saved token."""
         logger.debug(f"Attempting to load saved token...")
         self._token = None if reauth else await self.storage.load_token(name="spotify")
         if self._token:
@@ -261,18 +244,15 @@ class TokenHandler:
             self._token = await self._get_new_token()
         if self._refresh_task is None or self._refresh_task.done():
             await self._run()
-        # A saved token that is already expired has to be refreshed before the
-        # caller sends anything, or the first request goes out with it and eats a
-        # 401 before the retry does the refresh instead.
+        # refresh an expired saved token before the caller sends it
         await self._refresh_event.wait()
 
     async def get_token(self):
-        """ Returns current token after checking if the token needs to be refreshed """
+        """Return a usable token."""
         if not self._token:
             await self._login()
         if self._refresh_task is None or self._refresh_task.done():
-            # Nothing is refreshing this token, so waiting for a refresh would wait
-            # forever. Hand back what is in hand and let Spotify answer.
+            # no refresher running: hand back what is in hand
             return self._token
         # wait for refresh if needed
         await self._refresh_event.wait()

@@ -47,8 +47,6 @@ async def test_endpoints_without_a_scope_need_no_scope():
 
 
 async def test_a_saved_token_without_the_scope_is_rejected():
-    # The configured scope list says the app asked for it, the authorized token
-    # does not have it, so reauth is needed.
     with pytest.raises(ScopeError) as exc:
         await handler(["user-library-read"], granted_scopes=["user-read-email"])._check_scope("check_saved_items")
     assert "reauth=True" in str(exc.value)

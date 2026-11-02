@@ -54,7 +54,6 @@ async def is_listening(port):
 
 
 async def test_stop_without_any_login_is_safe(monkeypatch, free_port):
-    # Regression: stop() used to await a refresh task that was still None.
     handler = make_handler(monkeypatch, free_port)
     await handler.stop()
     assert handler._refresh_task is None
@@ -129,7 +128,6 @@ async def test_token_request_saves_the_token_and_remembers_the_granted_scopes(mo
 
 
 async def test_refresh_without_a_refresh_token_raises_instead_of_opening_a_browser(monkeypatch, free_port):
-    # Regression: this used to start an interactive login inside a headless process.
     handler = make_handler(monkeypatch, free_port)
     handler._token = {"access_token": "a", "expires_time": time.time() + 100}
     with pytest.raises(SpotifyError) as exc:
@@ -167,8 +165,6 @@ async def test_get_token_does_not_wait_for_a_refresher_that_is_gone(monkeypatch,
 
 
 async def test_a_refresher_that_already_ended_is_replaced_by_the_next_login(monkeypatch, free_port):
-    # A token with no expires_time ends the refresher at once: the next login has
-    # to start a fresh one instead of assuming the old task is still running.
     handler = make_handler(monkeypatch, free_port)
     expired = {"access_token": "a"}
     handler.storage.load_token = lambda name="": already(expired)
@@ -181,9 +177,6 @@ async def test_a_refresher_that_already_ended_is_replaced_by_the_next_login(monk
 
 
 async def test_login_refreshes_a_saved_token_that_is_already_expired(monkeypatch, local_server, free_port):
-    # Regression: the refresher used to open the "token is usable" signal before it
-    # had checked the token, so the first request went out with an expired token and
-    # had to be retried after a 401.
     local_server["script"] = [(200, {"access_token": "fresh", "refresh_token": "r",
                                      "expires_in": 3600, "scope": "user-library-read"}, {})]
     handler = make_handler(monkeypatch, free_port)

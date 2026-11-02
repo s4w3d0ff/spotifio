@@ -3,8 +3,7 @@ from setuptools import setup, find_packages
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
-# requirements.txt is the one place a dependency floor is written; reading it here
-# keeps a pinned install and a PyPI install asking for the same thing.
+# requirements.txt is the single place a floor is written
 with open("requirements.txt", "r", encoding="utf-8") as fh:
     install_requires = [
         line.strip() for line in fh
@@ -35,7 +34,7 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Framework :: AsyncIO",
     ],
-    # aiohttp 3.14.4 needs Python 3.10 or newer.
+    # aiohttp 3.14.4 needs 3.10+
     python_requires=">=3.10",
     install_requires=install_requires,
     keywords="spotify api async aiohttp music streaming oauth2",

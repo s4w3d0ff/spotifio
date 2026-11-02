@@ -92,8 +92,6 @@ def test_a_variable_name_with_a_space_in_it_is_an_error(clean_env, tmp_path):
 
 
 def test_two_variables_glued_onto_one_line_are_rejected(clean_env, tmp_path):
-    # A .env file whose last line has no newline glues the next variable onto it.
-    # Loading that silently stores a broken secret.
     path = write_env(tmp_path, "SPOTIFIO_CLIENT_SECRET=abcSPOTIFIO_SCOPES=user-read-email\n")
     with pytest.raises(ValueError) as exc:
         load_dotenv(path)

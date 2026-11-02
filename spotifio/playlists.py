@@ -2,12 +2,10 @@ from .request import RequestHandler
 
 
 class PlaylistMethods(RequestHandler):
-    """Playlist endpoints: the deprecated tracks variants and the items variants."""
+    """Playlist endpoints: tracks variants and items variants."""
 
     async def get_playlist(self, playlist_id, market=None, fields=None):
-        """Spotify no longer serves its own editorial playlists (37i9dQZF...) through
-        the web API: they answer 404 with an app-only token. Private playlists of
-        another account need a user token of an account that may read them."""
+        """GET /playlists/{playlist_id}. Editorial playlists (37i9dQZF...) answer 404."""
         await self._check_scope('get_playlist')
         params = {}
         if market:
@@ -18,11 +16,7 @@ class PlaylistMethods(RequestHandler):
 
     async def get_playlist_items(self, playlist_id, market=None, fields=None, limit=20,
                                  offset=0, additional_types=None):
-        """GET /playlists/{playlist_id}/items: the endpoint the docs list as the
-        replacement for GET /playlists/{playlist_id}/tracks. Unlike the tracks endpoint
-        it returns tracks and episodes together. The docs warn it answers 403 unless the
-        current user owns the playlist or collaborates on it, so it is not a drop-in for
-        reading someone else's playlist."""
+        """GET /playlists/{playlist_id}/items. Tracks and episodes together. 403 unless the user owns the playlist or collaborates on it."""
         await self._check_scope('get_playlist_items')
         params = {
             'limit': limit,
@@ -37,8 +31,7 @@ class PlaylistMethods(RequestHandler):
         return await self._request('GET', f'playlists/{playlist_id}/items', params=params)
 
     async def add_playlist_items(self, playlist_id, uris, position=None):
-        """POST /playlists/{playlist_id}/items: replacement for the deprecated
-        POST /playlists/{playlist_id}/tracks."""
+        """POST /playlists/{playlist_id}/items. Replaces POST /playlists/{playlist_id}/tracks."""
         await self._check_scope('add_playlist_items')
         params = {'uris': ','.join(uris)}
         if position is not None:
@@ -46,17 +39,13 @@ class PlaylistMethods(RequestHandler):
         return await self._request('POST', f'playlists/{playlist_id}/items', params=params)
 
     async def remove_playlist_items(self, playlist_id, items):
-        """DELETE /playlists/{playlist_id}/items: replacement for the deprecated
-        DELETE /playlists/{playlist_id}/tracks. `items` is a list of objects as the
-        docs require, e.g. [{'uri': 'spotify:track:4iV5W9uYEdYUVa79Axb7Rh'}]."""
+        """DELETE /playlists/{playlist_id}/items. items is a list of objects: [{'uri': 'spotify:track:4iV5W9uYEdYUVa79Axb7Rh'}]."""
         await self._check_scope('remove_playlist_items')
         return await self._request('DELETE', f'playlists/{playlist_id}/items', data={'items': items})
 
     async def update_playlist_items(self, playlist_id, uris=None, range_start=None,
                                     insert_before=None, range_length=None, snapshot_id=None):
-        """PUT /playlists/{playlist_id}/items: replacement for the deprecated
-        reorder/replace endpoint. Pass uris to replace items, or range_start,
-        insert_before, range_length and snapshot_id to reorder them."""
+        """PUT /playlists/{playlist_id}/items. uris replaces items; range_start, insert_before, range_length, snapshot_id reorder them."""
         await self._check_scope('update_playlist_items')
         params = {}
         if uris:
@@ -127,8 +116,7 @@ class PlaylistMethods(RequestHandler):
         return await self._request('GET', f'users/{user_id}/playlists', params=params)
 
     async def create_playlist(self, user_id, name, public=True, collaborative=False, description=None):
-        """Deprecated in the Spotify docs, which point at POST /me/playlists. The
-        request is still made: Spotify decides whether it answers."""
+        """POST users/{user_id}/playlists. Docs point at POST /me/playlists."""
         await self._check_scope('create_playlist')
         data = {
             'name': name,
@@ -140,8 +128,7 @@ class PlaylistMethods(RequestHandler):
         return await self._request('POST', f'users/{user_id}/playlists', data=data)
 
     async def get_featured_playlists(self, locale=None, country=None, limit=20, offset=0):
-        """Deprecated in the Spotify docs, with no replacement documented. The request
-        is still made: Spotify decides whether it answers."""
+        """GET /browse/featured-playlists. Not in the docs availability list."""
         await self._check_scope('get_featured_playlists')
         params = {
             'limit': limit,
@@ -154,8 +141,7 @@ class PlaylistMethods(RequestHandler):
         return await self._request('GET', 'browse/featured-playlists', params=params)
 
     async def get_category_playlists(self, category_id, country=None, limit=20, offset=0):
-        """Deprecated in the Spotify docs, with no replacement documented. The request
-        is still made: Spotify decides whether it answers."""
+        """GET /browse/categories/{category_id}/playlists. Not in the docs availability list."""
         await self._check_scope('get_category_playlists')
         params = {
             'limit': limit,

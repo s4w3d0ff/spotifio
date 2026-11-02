@@ -1,8 +1,5 @@
-# Scopes each Client method needs. Each value is a list of requirements, and a
-# requirement is either a scope name or a tuple of names where any one is enough
-# (Spotify accepts either the public or the private variant of a playlist write).
-# Reading a playlist needs no scope locally: Spotify answers 403 for the private
-# playlists a token may not read.
+# Method -> scopes. A tuple means any one works. Playlist reads need none locally:
+# Spotify answers 403.
 REQUIRED_SCOPES = {
     ### PLAYER -----------------------------------------
     'get_playback_state': ['user-read-playback-state'],

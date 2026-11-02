@@ -12,9 +12,5 @@ from .users import UserMethods
 class Client(PlaybackMethods, UserMethods, PlaylistMethods, TrackMethods,
              AlbumMethods, ArtistMethods, PodcastMethods, BrowseMethods,
              RequestHandler):
-    """Every Spotify Web API endpoint spotifio implements.
-
-    The domain method groups live in their own modules. RequestHandler supplies
-    login, the scope check and the HTTP layer.
-    """
+    """All spotifio endpoints. Domain groups live in their own modules; RequestHandler gives login, the scope check and the HTTP layer."""
     pass

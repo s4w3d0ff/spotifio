@@ -13,8 +13,6 @@ def _requirements():
 
 
 def test_requirements_txt_holds_the_security_floor():
-    # aiohttp 3.14.3 and older are vulnerable to CVE-2026-111064 (OAuth callback
-    # server) and CVE-2026-69244 (API requests). Lowering this floor reopens them.
     assert _requirements() == ["aiohttp>=3.14.4", "aiofiles>=24.1.0"]
 
 
@@ -31,7 +29,7 @@ def test_env_example_lists_every_variable_the_library_requires():
     required = set()
     for path in (ROOT / "spotifio").rglob("*.py"):
         required.update(re.findall(r'require_env\("([A-Z_]+)"', path.read_text()))
-    # SPOTIFIO_SCOPES is optional, so it is not found by the require_env search.
+    # SPOTIFIO_SCOPES is optional
     assert required == set(REQUIRED_VARS)
     for name in sorted(required | {"SPOTIFIO_SCOPES"}):
         assert f"{name}=" in example, f"{name} is required but missing from .env.example"
