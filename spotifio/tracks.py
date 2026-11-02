@@ -43,34 +43,43 @@ class TrackMethods(RequestHandler):
 
     async def save_library_items(self, uris):
         """PUT /me/library: the endpoint the docs list as the replacement for saving
-        tracks, albums, shows, episodes and audiobooks to the library.
-        `uris` is a list of Spotify URIs, e.g. ['spotify:track:4iV5W9uYEdYUVa79Axb7Rh']."""
+        tracks, albums, shows, episodes, audiobooks and follows. `uris` is up to 40
+        comma-separated Spotify URIs, not ids: spotify:track:, spotify:album:,
+        spotify:episode:, spotify:show:, spotify:audiobook:, spotify:user:,
+        spotify:playlist:. Spotify answers an empty body."""
         await self._check_scope('save_library_items')
         return await self._request('PUT', 'me/library', params={'uris': ','.join(uris)})
 
     async def remove_library_items(self, uris):
-        """DELETE /me/library: replacement for the per-type remove endpoints."""
+        """DELETE /me/library: replacement for the per-type remove endpoints, taking up
+        to 40 Spotify URIs. Spotify answers an empty body."""
         await self._check_scope('remove_library_items')
         return await self._request('DELETE', 'me/library', params={'uris': ','.join(uris)})
 
     async def check_saved_items(self, uris):
-        """GET /me/library/contains: replacement for the per-type contains endpoints."""
+        """GET /me/library/contains: replacement for the per-type contains endpoints.
+        `uris` takes up to 40 Spotify URIs (spotify:artist: is accepted here too) and
+        Spotify answers a list of booleans in the same order."""
         await self._check_scope('check_saved_items')
         return await self._request('GET', 'me/library/contains', params={'uris': ','.join(uris)})
 
     async def get_track_audio_features(self, track_id):
-        """Deprecated in the Spotify docs; Spotify answers 403 with no message. No
-        replacement is documented."""
+        """GET /audio-features/{track_id}: not in the Spotify docs list of endpoints that
+        remain available, and no replacement is documented. Spotify answers 403 with no
+        message here. The request is still made."""
         await self._check_scope('get_track_audio_features')
         return await self._request('GET', f'audio-features/{track_id}')
 
     async def get_several_audio_features(self, track_ids):
-        """Deprecated in the Spotify docs; Spotify answers 403 with no message."""
+        """GET /audio-features: batch lookup, listed as removed for Development Mode
+        apps; single items go through GET /audio-features/{track_id}."""
         await self._check_scope('get_several_audio_features')
         params = {'ids': ','.join(track_ids)}
         return await self._request('GET', 'audio-features', params=params)
 
     async def get_track_audio_analysis(self, track_id):
-        """Deprecated in the Spotify docs; Spotify answers 403 with no message."""
+        """GET /audio-analysis/{track_id}: not in the Spotify docs list of endpoints that
+        remain available, and no replacement is documented. Spotify answers 403 with no
+        message here."""
         await self._check_scope('get_track_audio_analysis')
         return await self._request('GET', f'audio-analysis/{track_id}')

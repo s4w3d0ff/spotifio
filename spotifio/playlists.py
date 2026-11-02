@@ -19,8 +19,10 @@ class PlaylistMethods(RequestHandler):
     async def get_playlist_items(self, playlist_id, market=None, fields=None, limit=20,
                                  offset=0, additional_types=None):
         """GET /playlists/{playlist_id}/items: the endpoint the docs list as the
-        replacement for GET /playlists/{playlist_id}/tracks. Unlike the tracks
-        endpoint it returns tracks and episodes together."""
+        replacement for GET /playlists/{playlist_id}/tracks. Unlike the tracks endpoint
+        it returns tracks and episodes together. The docs warn it answers 403 unless the
+        current user owns the playlist or collaborates on it, so it is not a drop-in for
+        reading someone else's playlist."""
         await self._check_scope('get_playlist_items')
         params = {
             'limit': limit,

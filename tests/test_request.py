@@ -123,3 +123,16 @@ async def test_a_failure_body_that_is_not_an_error_object_still_raises_cleanly(a
         await client._request("GET", "tracks/abc")
     assert exc.value.status == 502
     await client.close()
+
+
+async def test_a_failure_reason_is_kept_with_the_message(api, monkeypatch):
+    monkeypatch.setattr(RequestHandler, "MAX_ATTEMPTS", 1)
+    api["script"] = [(429, {
+        "error": {"message": "Too many requests", "reason": "QUOTA_EXCEEDED"}
+    }, {})]
+    client = api["new_handler"]()
+    with pytest.raises(SpotifyError) as exc:
+        await client._request("GET", "me/tracks")
+    assert exc.value.status == 429
+    assert "Too many requests (QUOTA_EXCEEDED)" in exc.value.reason
+    await client.close()

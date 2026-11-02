@@ -155,39 +155,57 @@ Spotify no longer accepts `localhost` as a redirect host. Use the loopback IP
 literal (`http://127.0.0.1:PORT/callback` or `http://[::1]:PORT/callback`) or
 HTTPS; spotifio raises `ValueError` if you pass `localhost`.
 
-## Deprecated endpoints
+## Endpoint availability
 
-The Spotify Web API reference marks these endpoints deprecated. spotifio still
-calls them — availability differs per app and per account — but when one fails
-with 403, 404 or 410 the `SpotifyError` message names the endpoint the docs
-point at instead, so you are not left guessing:
+The docs describe three different states and spotifio keeps them apart in the
+`SpotifyError` message:
+
+- **Deprecated**: the reference pages put that banner on the four
+  `/playlists/{id}/tracks` variants ("Use ... Items instead").
+- **Removed for Development Mode apps**: the February 2026 changelog and its
+  migration guide list these, and name a replacement for most of them.
+- **In neither list**: the page still exists and carries no banner, but the docs do
+  not list the endpoint among the ones that remain available.
+
+Quota mode decides what an app can actually call. The migration guide states that
+apps in Extended Quota Mode need no migration at all: every endpoint, field and
+behaviour stays as it was, and the generic `/me/library` endpoints are optional.
+Development Mode apps got the restrictions on 2026-02-11 (apps created then) and
+2026-03-09 (apps that already existed). spotifio still calls every endpoint it has
+a method for, so availability is Spotify's answer, not a local guess.
 
 ```
 Request failed with status 404: resource not found, or the endpoint has been
-removed [PUT me/tracks is deprecated by Spotify, use PUT /me/library (Save
-Items to User's Library)]
+removed [PUT me/tracks is removed by Spotify for Development Mode apps, use PUT
+/me/library with Spotify URIs]
 ```
 
-| deprecated by the docs | documented replacement |
+| what the docs no longer offer | what the docs give instead |
 |---|---|
-| `PUT`/`DELETE /me/tracks`, `/me/albums`, `/me/shows`, `/me/episodes`, `/me/audiobooks` | `PUT`/`DELETE /me/library` |
+| `PUT`/`DELETE /me/tracks`, `/me/albums`, `/me/shows`, `/me/episodes`, `/me/audiobooks` | `PUT`/`DELETE /me/library` with Spotify URIs |
 | `GET /me/tracks/contains`, `/me/albums/contains`, `/me/shows/contains`, `/me/episodes/contains`, `/me/audiobooks/contains` | `GET /me/library/contains` |
-| `GET`/`POST`/`PUT`/`DELETE /playlists/{id}/tracks` | `GET`/`POST`/`PUT`/`DELETE /playlists/{id}/items` |
-| `PUT`/`DELETE /playlists/{id}/followers`, `GET /playlists/{id}/followers/contains` | none documented |
-| `PUT`/`DELETE /me/following`, `GET /me/following/contains` | none documented |
-| `GET /users/{id}`, `GET /users/{id}/playlists`, `POST /users/{id}/playlists` | `GET /me/playlists`, `POST /me/playlists` |
-| batch `GET /tracks`, `/albums`, `/artists`, `/episodes`, `/shows`, `/chapters`, `/audiobooks` | request the items one by one |
-| `GET /audio-features`, `GET /audio-features/{id}`, `GET /audio-analysis/{id}` | none documented |
-| `GET /artists/{id}/related-artists`, `GET /artists/{id}/top-tracks` | none documented |
-| `GET /browse/featured-playlists`, `GET /browse/categories`, `GET /browse/categories/{id}`, `GET /browse/categories/{id}/playlists`, `GET /browse/new-releases` | none documented |
-| `GET /recommendations`, `GET /recommendations/available-genre-seeds` | none documented |
-| `GET /markets` | none documented |
+| `PUT`/`DELETE /me/following`, `GET /me/following/contains` | `PUT`/`DELETE /me/library` and `GET /me/library/contains` (the changelog points follows at them; the save page lists user and playlist URIs, the contains page also lists artist URIs) |
+| `PUT`/`DELETE /playlists/{id}/followers`, `GET /playlists/{id}/followers/contains` | `PUT`/`DELETE /me/library` and `GET /me/library/contains` with the `spotify:playlist:` URI |
+| `GET`/`POST`/`PUT`/`DELETE /playlists/{id}/tracks` | the matching `/playlists/{id}/items` endpoint |
+| batch `GET /tracks`, `/albums`, `/artists`, `/episodes`, `/shows`, `/chapters`, `/audiobooks` | `GET /tracks/{id}` and friends |
+| `GET /users/{id}` | none; `GET /me` covers your own profile |
+| `GET /users/{id}/playlists` | none; `GET /me/playlists` covers your own |
+| `POST /users/{id}/playlists` | `POST /me/playlists` |
+| `GET /browse/categories`, `GET /browse/categories/{id}`, `GET /browse/new-releases`, `GET /artists/{id}/top-tracks`, `GET /markets` | none documented |
+| batch `GET /audio-features` | `GET /audio-features/{id}` |
+| `GET /audio-features/{id}`, `GET /audio-analysis/{id}`, `GET /artists/{id}/related-artists`, `GET /recommendations`, `GET /recommendations/available-genre-seeds`, `GET /browse/featured-playlists`, `GET /browse/categories/{id}/playlists` | none documented |
 
-Not deprecated, and unchanged in spotifio: `GET /me/tracks`, `/me/albums`,
-`/me/shows`, `/me/episodes`, `/me/audiobooks`, `/me/following` (reading your
-library), everything under `/me/player`, `GET /me/top/{type}`, `GET /me/playlists`,
-`POST /me/playlists`, `GET /search`, `GET /playlists/{id}`, and the new
+Still documented as available, and unchanged in spotifio: `GET /me/tracks`,
+`/me/albums`, `/me/shows`, `/me/episodes`, `/me/audiobooks`, `/me/following`
+(reading your library), everything under `/me/player`, `GET /me/top/{type}`,
+`GET /me/playlists`, `POST /me/playlists`, `GET /search`, `GET /playlists/{id}`,
+`GET /playlists/{id}/images`, the single-item lookups, and the newer
 `/me/library` and `/playlists/{id}/items` endpoints.
+
+There is no `GET /me/library`. The docs offer only the save, remove and contains
+forms, so reading your library stays per type: `get_user_saved_tracks`,
+`get_user_saved_albums`, `get_user_saved_shows`, `get_user_saved_episodes`,
+`get_user_saved_audiobooks`.
 
 ## New methods for the documented replacements
 
@@ -204,8 +222,11 @@ await c.update_playlist_items(playlist_id, range_start=1, insert_before=3, range
 ```
 
 `get_playlist_items` returns tracks and episodes together; pass
-`additional_types` or `fields` if you need to narrow it. The old per-type and
-per-playlist methods still exist so existing code keeps running.
+`additional_types` or `fields` if you need to narrow it. The docs warn it answers
+403 unless the current user owns the playlist or collaborates on it, so it reads
+your own playlists, not someone else's: for those stay with `get_playlist` and
+`get_playlist_tracks`. The old per-type and per-playlist methods still exist so
+existing code keeps running.
 
 ## Behaviour observed with this app (2026-11-01)
 
@@ -220,6 +241,8 @@ every app. The deprecated/replacement table above comes from the docs.
 - Batch endpoints (`/tracks`, `/albums`, `/artists`, `/episodes`, `/shows`,
   `/chapters`, `/audiobooks`) require `ids`; without them they return 400
   "Missing required field: ids".
+- `GET /search` documents `limit` as 0-10 with a default of 5 (it was 20). This app
+  still gets results at `limit=20`; a Development Mode app should pass 10 or less.
 - Spotify answers **410** for a malformed request path (for example a base URL
   built without a separating slash). spotifio no longer raises 410 itself; the
   status you see is the status Spotify sent.
@@ -229,9 +252,12 @@ every app. The deprecated/replacement table above comes from the docs.
   404 for others. Use `get_current_user()` for your own profile — its
   `account_id` field (added May 2026) is the stable public identifier.
 
-Fields removed from responses: `track.linked_from`, `track.isPlayable`,
-`album.album_group`. Still present: `available_markets`, `external_ids`,
-`popularity`, `album.label`, `artist.followers`.
+Fields the docs mark deprecated in the response schemas: `track.linked_from`,
+`track.isPlayable`, `album.album_group`, `artist.followers`, `artist.genres`,
+`artist.popularity`, `album.available_markets`, `track.available_markets`. With
+this app (extended quota mode) `available_markets`, `external_ids`, `popularity`,
+`album.label` and `artist.followers` are still returned; a Development Mode app has
+no reason to expect them.
 
 ## Errors
 
@@ -242,6 +268,9 @@ Spotify sometimes answers with no message at all (for example
 endpoint needs, so it never reaches Spotify.
 
 A 401 refreshes the token and retries; a 429 waits `Retry-After` and retries.
+A 429 body carries a machine readable reason (`{"error":{"status":429,"message":
+"Too many requests","reason":"QUOTA_EXCEEDED"}}`) and spotifio appends it to
+`.reason`, here `Too many requests (QUOTA_EXCEEDED)`.
 `RequestHandler.MAX_ATTEMPTS` (6) bounds both, and the error you get carries the
 last status Spotify actually sent. `login()` refreshes a saved token that is already
 expired before it returns, so the first request does not go out with an expired

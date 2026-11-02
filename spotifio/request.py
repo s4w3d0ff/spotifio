@@ -130,6 +130,12 @@ class RequestHandler:
             error = payload.get('error')
             if isinstance(error, dict):
                 reason = error.get('message')
+                # Some failures carry a machine readable reason next to the message,
+                # e.g. a 429 body of {"error":{"status":429,"message":"Too many
+                # requests","reason":"QUOTA_EXCEEDED"}}.
+                detail = error.get('reason')
+                if detail:
+                    reason = f"{reason} ({detail})" if reason else detail
         # Spotify now answers some failures with a bare status, e.g. {"error":{"status":403}}
         if not reason:
             reason = FAILURE_HINTS.get(resp.status, "no message returned by Spotify")

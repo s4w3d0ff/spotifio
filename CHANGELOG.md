@@ -46,8 +46,22 @@ answer.
   the token response) instead of only the list passed to the constructor. A
   call that used to be blocked locally goes through when the token really has
   the scope.
-- A 403, 404 or 410 on an endpoint the docs mark deprecated names the
+- A 403, 404 or 410 on an endpoint the docs no longer offer names the
   documented replacement in the error message.
+- The endpoint table keeps the three states the docs use apart: a `[DEPRECATED]`
+  banner on the four `/playlists/{id}/tracks` variants, `[REMOVED]` in the
+  February 2026 changelog for Development Mode apps, and endpoints whose pages
+  still exist with no banner but which are absent from the list of endpoints that
+  remain available. The follow endpoints now name `/me/library` and
+  `GET /me/library/contains` as their replacement instead of "none documented",
+  and each batch lookup names the single-item form that stays available
+  (`GET /tracks` to `GET /tracks/{id}`).
+- Method docstrings say which of those states applies to the endpoint they call,
+  along with the 403 rule on `GET /playlists/{id}/items` (it answers for the
+  playlist owner and its collaborators only), the 40-URI limit and URI-not-id form
+  of the `/me/library` endpoints, and the documented `GET /search` limit range
+  (0-10, default 5). There is no documented `GET /me/library` read endpoint, so
+  reading your library stays per type.
 - Reading your own library (`GET /me/tracks` and friends) is documented as
   valid and is unchanged; the deprecated save/remove/contains variants are
   still called, they are only reported more clearly.
@@ -87,6 +101,9 @@ answer.
   `add_playlist_items`, `remove_playlist_items`, `update_playlist_items`.
 - `Client.login(reauth=True)` to authorize again for a different scope list.
 - `SpotifyError.status`, `.reason`, `.body`.
+- A machine readable reason in a failure body is appended to `SpotifyError.reason`
+  (`{"error":{"status":429,"message":"Too many requests","reason":"QUOTA_EXCEEDED"}}`
+  reads `Too many requests (QUOTA_EXCEEDED)`).
 - The token file is written `0600` (it was group-readable).
 - `.env.example` documents the four variables, with the format each needs.
 - `spotifio.ScopeError`, `Client.close()`, and using a client as an async
